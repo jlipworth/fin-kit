@@ -5,25 +5,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 ## Build Commands
 
 ```bash
+# Prerequisites (macOS)
+brew install llvm quantlib ninja
+
 # Set up Python environment (first time)
 uv sync
 
-# Activate venv and install dependencies
-source .venv/bin/activate
-conan install . --build=missing -of=build
+# Install Conan dependencies (use LLVM Clang for C++20 modules)
+CC=/opt/homebrew/opt/llvm/bin/clang \
+CXX=/opt/homebrew/opt/llvm/bin/clang++ \
+LDFLAGS="-L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++" \
+uv run conan install . --build=missing -of=build \
+  -s compiler=clang -s compiler.version=21 -s compiler.cppstd=20 -s compiler.libcxx=libc++
 
-# Configure (choose one)
-cmake --preset conan-release    # Release build
-cmake --preset conan-debug      # Debug build
+# Configure
+CC=/opt/homebrew/opt/llvm/bin/clang \
+CXX=/opt/homebrew/opt/llvm/bin/clang++ \
+cmake --preset conan-release
 
 # Build
-cmake --build build --config Release
+cmake --build build/build/Release
 
 # Run all tests
-ctest --test-dir build --output-on-failure
+ctest --test-dir build/build/Release --output-on-failure
 
 # Run specific test
-ctest --test-dir build -R <test_name> --output-on-failure
+ctest --test-dir build/build/Release -R <test_name> --output-on-failure
 ```
 
 ## Architecture
@@ -73,13 +80,17 @@ Module interface units are `.cppm` files in each module's `src/` directory:
 
 ## Dependencies
 
-C++ dependencies managed by Conan:
-- QuantLib (bond pricing)
+### Homebrew (macOS)
+- **llvm** - LLVM Clang 21+ (required for C++20 modules)
+- **quantlib** - Bond pricing (Conan's version has consteval issues with Clang 21)
+- **ninja** - Build system (required for C++20 module scanning)
+
+### Conan
 - DuckDB (data storage)
 - spdlog (logging)
-- fmt (formatting)
+- fmt (formatting, pulled in by spdlog)
 - nlohmann_json (JSON)
 
-Python dev dependencies in `pyproject.toml`:
+### Python (via uv)
 - conan
 - pre-commit

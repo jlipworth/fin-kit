@@ -10,8 +10,8 @@ class FinkitConan(ConanFile):
     generators = "CMakeDeps"
 
     def requirements(self):
-        # TODO: Add quantlib/1.30 when Boost compatibility is resolved
-        # (Boost 1.80.0 fails with Apple Clang 17)
+        # QuantLib from Homebrew (brew install quantlib) - Conan's 1.30 has
+        # consteval issues with Clang 21's std::format
         self.requires("duckdb/1.4.3")
         self.requires("spdlog/1.17.0")
         # fmt is pulled in by spdlog - don't specify separately to avoid conflicts

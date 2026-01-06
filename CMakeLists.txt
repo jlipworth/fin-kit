@@ -17,8 +17,22 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
 endif()
 
-# Find Conan-installed packages TODO: Add QuantLib when Boost compatibility is
-# resolved find_package(QuantLib REQUIRED)
+# Homebrew paths for macOS (QuantLib, Boost)
+if(APPLE)
+  execute_process(
+    COMMAND brew --prefix
+    OUTPUT_VARIABLE HOMEBREW_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
+  set(ENV{PKG_CONFIG_PATH}
+      "${HOMEBREW_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+endif()
+
+# QuantLib from Homebrew via pkg-config (brew install quantlib)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(QuantLib REQUIRED IMPORTED_TARGET quantlib)
+
+# Conan-installed packages
 find_package(duckdb REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
