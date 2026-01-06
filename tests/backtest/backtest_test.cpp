@@ -1,7 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
-#include "finkit/backtest.hpp"
+import finkit.backtest;
 
-TEST_CASE("Backtest placeholder test", "[backtest]") {
-    REQUIRE(true);
+TEST(BacktestTest, Placeholder) {
+    EXPECT_TRUE(true);
 }

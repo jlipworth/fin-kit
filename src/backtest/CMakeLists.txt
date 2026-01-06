@@ -1,16 +1,9 @@
-add_library(finkit_backtest
-    src/backtest.cpp
-)
+add_library(finkit_backtest)
 
-target_include_directories(finkit_backtest
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
+target_sources(finkit_backtest PUBLIC FILE_SET CXX_MODULES FILES
+                                      src/backtest.cppm)
 
-target_link_libraries(finkit_backtest
-    PUBLIC finkit::analysis
-)
+target_link_libraries(finkit_backtest PUBLIC finkit::analysis)
 
 target_compile_features(finkit_backtest PUBLIC cxx_std_20)
 

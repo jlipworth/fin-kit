@@ -1,7 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
-#include "finkit/core.hpp"
+import finkit.core;
 
-TEST_CASE("Core placeholder test", "[core]") {
-    REQUIRE(true);
+TEST(CoreTest, Placeholder) {
+    EXPECT_TRUE(true);
 }

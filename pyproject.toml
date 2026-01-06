@@ -1,0 +1,12 @@
+[project]
+name = "finkit-dev"
+version = "0.1.0"
+description = "Development dependencies for fin-kit"
+requires-python = ">=3.11"
+dependencies = [
+    "conan>=2.0",
+    "pre-commit>=3.0",
+]
+
+[tool.uv]
+dev-dependencies = []

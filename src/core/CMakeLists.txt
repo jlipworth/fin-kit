@@ -1,12 +1,6 @@
-add_library(finkit_core
-    src/core.cpp
-)
+add_library(finkit_core)
 
-target_include_directories(finkit_core
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
+target_sources(finkit_core PUBLIC FILE_SET CXX_MODULES FILES src/core.cppm)
 
 target_compile_features(finkit_core PUBLIC cxx_std_20)
 

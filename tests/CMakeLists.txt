@@ -1,7 +1,5 @@
-find_package(Catch2 REQUIRED)
-
 include(CTest)
-include(Catch)
+include(GoogleTest)
 
 add_subdirectory(core)
 add_subdirectory(data)

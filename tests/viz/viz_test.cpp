@@ -1,7 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
-#include "finkit/viz.hpp"
+import finkit.viz;
 
-TEST_CASE("Viz placeholder test", "[viz]") {
-    REQUIRE(true);
+TEST(VizTest, Placeholder) {
+    EXPECT_TRUE(true);
 }

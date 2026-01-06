@@ -1,7 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
-#include "finkit/data.hpp"
+import finkit.data;
 
-TEST_CASE("Data placeholder test", "[data]") {
-    REQUIRE(true);
+TEST(DataTest, Placeholder) {
+    EXPECT_TRUE(true);
 }

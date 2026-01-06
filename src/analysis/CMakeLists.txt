@@ -1,16 +1,9 @@
-add_library(finkit_analysis
-    src/analysis.cpp
-)
+add_library(finkit_analysis)
 
-target_include_directories(finkit_analysis
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
+target_sources(finkit_analysis PUBLIC FILE_SET CXX_MODULES FILES
+                                      src/analysis.cppm)
 
-target_link_libraries(finkit_analysis
-    PUBLIC finkit::data
-)
+target_link_libraries(finkit_analysis PUBLIC finkit::data)
 
 target_compile_features(finkit_analysis PUBLIC cxx_std_20)
 
