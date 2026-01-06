@@ -1,0 +1,48 @@
+variables:
+  - &image "fin-kit-ci:latest"
+
+steps:
+  build-image:
+    image: docker
+    commands:
+      - docker build -t fin-kit-ci:latest -f ci/Dockerfile .
+    when:
+      path:
+        - "ci/Dockerfile"
+
+  install-deps:
+    image: *image
+    commands:
+      - conan install . --build=missing -of=build
+
+  build-release:
+    image: *image
+    commands:
+      - cmake --preset conan-release
+      - cmake --build build --config Release
+    depends_on:
+      - install-deps
+
+  test:
+    image: *image
+    commands:
+      - ctest --test-dir build --output-on-failure
+    depends_on:
+      - build-release
+
+  lint:
+    image: *image
+    commands:
+      - pre-commit run --all-files
+    depends_on:
+      - install-deps
+
+  build-debug:
+    image: *image
+    commands:
+      - cmake --preset conan-debug
+      - cmake --build build --config Debug
+    depends_on:
+      - install-deps
+    when:
+      branch: develop
