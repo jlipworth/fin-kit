@@ -26,11 +26,29 @@ if(APPLE)
   list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
   set(ENV{PKG_CONFIG_PATH}
       "${HOMEBREW_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+
+  # Boost headers for QuantLib (brew install boost)
+  execute_process(
+    COMMAND brew --prefix boost
+    OUTPUT_VARIABLE BOOST_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set(BOOST_ROOT "${BOOST_PREFIX}")
 endif()
 
-# QuantLib from Homebrew via pkg-config (brew install quantlib)
+# QuantLib from Homebrew via pkg-config (brew install quantlib) Note: QuantLib's
+# pkg-config sets -std=c++17 which would override our C++20. We create a custom
+# interface target with only include/link dirs.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(QuantLib REQUIRED IMPORTED_TARGET quantlib)
+pkg_check_modules(QuantLib REQUIRED quantlib)
+
+add_library(QuantLib::QuantLib INTERFACE IMPORTED)
+target_include_directories(QuantLib::QuantLib
+                           INTERFACE ${QuantLib_INCLUDE_DIRS})
+target_link_directories(QuantLib::QuantLib INTERFACE ${QuantLib_LIBRARY_DIRS})
+target_link_libraries(QuantLib::QuantLib INTERFACE ${QuantLib_LIBRARIES})
+
+# Boost headers (required by QuantLib)
+find_package(Boost REQUIRED)
 
 # Conan-installed packages
 find_package(duckdb REQUIRED)
@@ -56,6 +74,7 @@ enable_testing()
 # Source modules
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+add_subdirectory(src/curves)
 add_subdirectory(src/analysis)
 add_subdirectory(src/backtest)
 add_subdirectory(src/viz)

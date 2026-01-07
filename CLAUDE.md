@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ```bash
 # Prerequisites (macOS)
-brew install llvm quantlib ninja
+brew install llvm quantlib boost ninja
 
 # Set up Python environment (first time)
 uv sync
@@ -44,6 +44,7 @@ fin-kit is a **C++20-first** financial toolkit. Use C++20 features throughout:
 
 - **finkit.core**: Foundation library with time series containers, datetime handling, and numerical utilities
 - **finkit.data**: Market data ingestion, normalization, and storage layer (DuckDB/Parquet)
+- **finkit.curves**: Rate curve bootstrapping (SOFR OIS), CIP/CCY basis calculations
 - **finkit.analysis**: Technical indicators, statistical functions, bond basis calculations (QuantLib)
 - **finkit.backtest**: Event-driven backtesting engine with order management and execution simulation
 - **finkit.viz**: Terminal-based charts and reporting
@@ -51,14 +52,17 @@ fin-kit is a **C++20-first** financial toolkit. Use C++20 features throughout:
 ### Dependency Graph
 
 ```
-finkit.core → finkit.data → finkit.analysis → finkit.backtest → finkit.viz
+finkit.core → finkit.data → finkit.curves ─┬→ finkit.analysis → finkit.backtest → finkit.viz
+                           └───────────────┘
 ```
 
 ### Module Files
 
-Module interface units are `.cppm` files in each module's `src/` directory:
-- `src/core/src/core.cppm`
-- `src/data/src/data.cppm`
+Module interface units are `.cppm` files in each module's directory:
+- `src/core/core.cppm`
+- `src/data/data.cppm`
+- `src/curves/curves.cppm`
+- `src/analysis/analysis.cppm`
 - etc.
 
 ## Code Style
@@ -83,6 +87,7 @@ Module interface units are `.cppm` files in each module's `src/` directory:
 ### Homebrew (macOS)
 - **llvm** - LLVM Clang 21+ (required for C++20 modules)
 - **quantlib** - Bond pricing (Conan's version has consteval issues with Clang 21)
+- **boost** - Headers required by QuantLib
 - **ninja** - Build system (required for C++20 module scanning)
 
 ### Conan
