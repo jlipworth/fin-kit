@@ -1,7 +1,6 @@
 add_library(finkit_backtest)
 
-target_sources(finkit_backtest PUBLIC FILE_SET CXX_MODULES FILES
-                                      src/backtest.cppm)
+target_sources(finkit_backtest PUBLIC FILE_SET CXX_MODULES FILES backtest.cppm)
 
 target_link_libraries(finkit_backtest PUBLIC finkit::analysis)
 

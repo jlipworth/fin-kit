@@ -37,6 +37,7 @@ find_package(duckdb REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(tomlplusplus REQUIRED)
 
 # GoogleTest via FetchContent
 include(FetchContent)
