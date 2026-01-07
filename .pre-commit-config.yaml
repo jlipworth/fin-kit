@@ -21,7 +21,8 @@ repos:
     hooks:
       - id: cmake-format
         args: ['--in-place']
-      - id: cmake-lint
+      # Note: cmake-lint removed (conflicts with cmake-format)
+      # Use clang-tidy for C++ linting (run after build with compile_commands.json)
 
   - repo: local
     hooks:
