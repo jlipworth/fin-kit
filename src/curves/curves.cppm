@@ -1,16 +1,19 @@
 module;
 
-#include <chrono>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <ql/quantlib.hpp>
 #include <spdlog/spdlog.h>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 export module finkit.curves;
 
+import finkit.types;
 import finkit.data;
+import finkit.bootstrap;
 
 export namespace finkit::curves {
 
@@ -20,287 +23,38 @@ using std::vector;
 
 namespace ql = QuantLib;
 
-// ============================================================================
-// Currency and Index Types
-// See: docs/INPUT_REQUIREMENTS.md Section 2.5
-// ============================================================================
+// Re-export types for convenience
+using finkit::types::CIPBasisResult;
+using finkit::types::Currency;
+using finkit::types::FXForward;
+using finkit::types::FXSpot;
+using finkit::types::FXSwap;
+using finkit::types::G10BasisSnapshot;
+using finkit::types::InterestRate;
+using finkit::types::XCCYBasisSwap;
 
-enum class Currency { USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD, NOK, SEK };
+// Use types functions
+using finkit::types::currency_to_string;
+using finkit::types::g10_pairs;
+using finkit::types::get_convention;
+using finkit::types::string_to_currency;
 
-enum class OvernightIndex {
-    SOFR,   // USD - Secured Overnight Financing Rate
-    ESTR,   // EUR - Euro Short-Term Rate (was EONIA)
-    SONIA,  // GBP - Sterling Overnight Index Average
-    TONAR,  // JPY - Tokyo Overnight Average Rate
-    SARON,  // CHF - Swiss Average Rate Overnight
-    AONIA,  // AUD - RBA Interbank Overnight Cash Rate
-    CORRA,  // CAD - Canadian Overnight Repo Rate Average
-    NZONIA, // NZD - Official Cash Rate
-    NOWA,   // NOK - Norwegian Overnight Weighted Average
-    SWESTR  // SEK - Swedish krona Short Term Rate
-};
-
-// Currency conventions table
-struct CurrencyConvention {
-    Currency currency;
-    OvernightIndex ois_index;
-    ql::DayCounter day_count;
-    int spot_lag;    // T+1 for CAD, T+2 for others
-    double pip_size; // 0.0001 for most, 0.01 for JPY
-};
-
-auto get_convention(Currency ccy) -> CurrencyConvention {
-    switch (ccy) {
-    case Currency::USD:
-        return {ccy, OvernightIndex::SOFR, ql::Actual360(), 2, 0.0001};
-    case Currency::EUR:
-        return {ccy, OvernightIndex::ESTR, ql::Actual360(), 2, 0.0001};
-    case Currency::GBP:
-        return {ccy, OvernightIndex::SONIA, ql::Actual365Fixed(), 2, 0.0001};
-    case Currency::JPY:
-        return {ccy, OvernightIndex::TONAR, ql::Actual365Fixed(), 2, 0.01};
-    case Currency::CHF:
-        return {ccy, OvernightIndex::SARON, ql::Actual360(), 2, 0.0001};
-    case Currency::AUD:
-        return {ccy, OvernightIndex::AONIA, ql::Actual365Fixed(), 2, 0.0001};
-    case Currency::CAD:
-        return {ccy, OvernightIndex::CORRA, ql::Actual365Fixed(), 1, 0.0001};
-    case Currency::NZD:
-        return {ccy, OvernightIndex::NZONIA, ql::Actual365Fixed(), 2, 0.0001};
-    case Currency::NOK:
-        return {ccy, OvernightIndex::NOWA, ql::Actual360(), 2, 0.0001};
-    case Currency::SEK:
-        return {ccy, OvernightIndex::SWESTR, ql::Actual360(), 2, 0.0001};
-    }
-    return {Currency::USD, OvernightIndex::SOFR, ql::Actual360(), 2, 0.0001};
-}
-
-// ============================================================================
-// SOFR Curve Bootstrapping Types
-// See: docs/INPUT_REQUIREMENTS.md Section 3
-// ============================================================================
-
-// SOFR overnight fixing (historical data needed for swap pricing)
-struct SOFRFixing {
-    ql::Date fixing_date; // Publication date
-    double rate;          // Overnight rate (e.g., 0.053 for 5.3%)
-};
-
-// SOFR Futures (SR1 = 1-month, SR3 = 3-month)
-enum class SOFRFuturesType { SR1, SR3 };
-
-struct SOFRFuture {
-    string contract_code; // e.g., "SFRZ4"
-    SOFRFuturesType type;
-    double price;             // Quote (100 - rate)
-    double implied_rate;      // 100 - price
-    ql::Date reference_start; // Start of averaging period
-    ql::Date reference_end;   // End of averaging period
-    ql::Date last_trade_date;
-    optional<double> convexity_adj; // Futures vs forward adjustment
-};
-
-// OIS Swap quote
-struct OISQuote {
-    string tenor; // e.g., "1Y", "5Y", "10Y"
-    double rate;  // Quoted fixed rate
-    ql::Date as_of;
-    ql::Date effective_date; // Swap start
-    ql::Date maturity_date;  // Swap end
-};
-
-// FOMC meeting dates (for turn adjustments)
-struct FOMCMeeting {
-    ql::Date meeting_date;
-    bool has_press_conference;
-    optional<double> implied_move; // Market-implied rate change
-};
-
-// Curve construction parameters
-struct CurveConfig {
-    enum class Interpolation { Linear, LogLinear, Cubic, MonotonicCubic };
-    enum class InterpolationVariable { ZeroRates, DiscountFactors, ForwardRates };
-
-    Interpolation interpolation{Interpolation::LogLinear};
-    InterpolationVariable variable{InterpolationVariable::DiscountFactors};
-    ql::DayCounter day_count{ql::Actual360()};
-    ql::Compounding compounding{ql::Continuous};
-};
-
-// Bootstrap result
-struct BootstrapResult {
-    ql::ext::shared_ptr<ql::YieldTermStructure> curve;
-    vector<ql::Date> pillar_dates;
-    vector<double> zero_rates;
-    vector<double> discount_factors;
-    vector<double> forward_rates; // Instantaneous forward at pillars
-    bool success{false};
-    string error_message;
-};
-
-// ============================================================================
-// SOFR Curve Bootstrapping
-// ============================================================================
-
-// Build SOFR curve from market instruments
-// Instrument priority: SOFR fixing -> SR1/SR3 futures -> OIS swaps
-auto bootstrap_sofr_curve(const vector<SOFRFixing>& fixings, const vector<SOFRFuture>& futures,
-                          const vector<OISQuote>& swaps, const ql::Date& settle_date,
-                          const CurveConfig& config = CurveConfig{}) -> BootstrapResult {
-    // TODO: Implement SOFR curve bootstrapping using QuantLib
-    //
-    // QuantLib classes to use:
-    // - ql::Sofr (overnight index)
-    // - ql::OISRateHelper (for swap quotes)
-    // - ql::OvernightIndexFutureRateHelper (for futures)
-    // - ql::PiecewiseYieldCurve<Discount, LogLinear>
-    //
-    // Steps:
-    // 1. Create Sofr index with historical fixings
-    // 2. Build rate helpers:
-    //    - Short end: futures (SR1, SR3) with convexity adjustment
-    //    - Long end: OIS swaps
-    // 3. Handle instrument overlaps (prefer futures in overlap region)
-    // 4. Bootstrap curve
-    // 5. Extract pillar dates, zero rates, discount factors
-
-    (void)fixings;
-    (void)futures;
-    (void)swaps;
-    (void)settle_date;
-    (void)config;
-
-    spdlog::warn("bootstrap_sofr_curve: Not yet implemented");
-
-    BootstrapResult result;
-    result.success = false;
-    result.error_message = "Not implemented";
-    return result;
-}
-
-// Forward SOFR rate between two dates
-auto forward_rate(const ql::YieldTermStructure& curve, const ql::Date& start, const ql::Date& end,
-                  ql::DayCounter day_count = ql::Actual360()) -> double {
-    return curve.forwardRate(start, end, day_count, ql::Simple).rate();
-}
-
-// Zero rate at a given date
-auto zero_rate(const ql::YieldTermStructure& curve, const ql::Date& date,
-               ql::DayCounter day_count = ql::Actual360()) -> double {
-    return curve.zeroRate(date, day_count, ql::Continuous).rate();
-}
-
-// Discount factor at a given date
-auto discount_factor(const ql::YieldTermStructure& curve, const ql::Date& date) -> double {
-    return curve.discount(date);
-}
-
-// ============================================================================
-// FX and CIP Basis Types
-// See: docs/INPUT_REQUIREMENTS.md Section 2
-// Reference: Du, Tepper, Verdelhan (2018)
-// ============================================================================
-
-struct FXSpot {
-    Currency base;  // e.g., EUR
-    Currency quote; // e.g., USD (EURUSD)
-    double mid;
-    double bid;
-    double ask;
-    ql::Date spot_date; // Settlement date (typically T+2)
-    ql::Date as_of;     // Quote timestamp
-};
-
-struct FXForward {
-    Currency base;
-    Currency quote;
-    string tenor; // ON, TN, SN, 1W, 1M, 3M, 6M, 1Y, etc.
-
-    double forward_points_mid; // In pips
-    double forward_points_bid;
-    double forward_points_ask;
-
-    double outright_mid; // Spot + points
-    double outright_bid;
-    double outright_ask;
-
-    ql::Date value_date;   // Forward settlement
-    double spot_reference; // Spot rate used for points
-};
-
-struct FXSwap {
-    Currency base;
-    Currency quote;
-    double spot_rate;
-    double forward_points;
-    ql::Date near_date; // Near leg (typically spot)
-    ql::Date far_date;  // Far leg
-};
-
-// Interest rate for CIP calculation
-struct InterestRate {
-    Currency currency;
-    string tenor;
-    double rate_mid;
-    double rate_bid;
-    double rate_ask;
-    ql::DayCounter day_count;
-    enum class Type { OIS, Repo, Deposit, LIBOR } rate_type;
-    ql::Date as_of;
-};
-
-// Cross-currency basis swap
-struct XCCYBasisSwap {
-    Currency base;            // Non-USD leg
-    Currency quote;           // USD leg
-    string tenor;             // 1Y, 2Y, 5Y, 10Y, 30Y
-    double basis_spread;      // Spread in bps
-    bool spread_on_base_leg;  // True if spread on non-USD leg
-    string base_float_index;  // e.g., "ESTR"
-    string quote_float_index; // e.g., "SOFR"
-};
-
-// ============================================================================
-// CIP Basis Calculation Results
-// ============================================================================
-
-struct CIPBasisResult {
-    Currency base;
-    Currency quote;
-    string tenor;
-    ql::Date start_date;
-    ql::Date end_date;
-    double year_fraction;
-
-    // Input rates used
-    double fx_spot;
-    double fx_forward;
-    double rate_base;  // OIS rate in base currency
-    double rate_quote; // OIS rate in quote currency
-
-    // CIP calculation
-    double theoretical_forward; // F = S × (1 + r_q × t) / (1 + r_b × t)
-    double cip_basis_bps;       // (Implied_r - Actual_r) × 10000
-    double annualized_basis;
-
-    // Transaction cost analysis
-    double basis_bid;           // Using bid rates
-    double basis_ask;           // Using ask rates
-    double round_trip_cost_bps; // Bid-ask spread in bps
-
-    // Arbitrage analysis
-    double arb_pnl_per_million; // P&L per $1M notional
-    bool is_exploitable;        // After transaction costs
-    string arb_direction;       // "borrow_base_lend_quote" or reverse
-};
+// Re-export bootstrap functions for backward compatibility
+using finkit::bootstrap::bootstrap_ois_curve;
+using finkit::bootstrap::bootstrap_sofr_curve;
+using finkit::bootstrap::discount_factor;
+using finkit::bootstrap::forward_rate;
+using finkit::bootstrap::zero_rate;
 
 // ============================================================================
 // CIP Basis Calculations
+// Reference: Du, Tepper, Verdelhan (2018)
+// TODO: Move to finkit.basis module in future refactoring
 // ============================================================================
 
-// Calculate CIP basis from FX forward and interest rates
-// CIP: F/S = (1 + r_quote × t) / (1 + r_base × t)
-// Basis = implied_r_quote - actual_r_quote
+/// Calculate CIP basis from FX forward and interest rates
+/// CIP: F/S = (1 + r_quote x t) / (1 + r_base x t)
+/// Basis = implied_r_quote - actual_r_quote
 auto calculate_cip_basis(const FXSpot& spot, const FXForward& forward,
                          const InterestRate& rate_base,
                          const InterestRate& rate_quote) -> CIPBasisResult {
@@ -331,8 +85,8 @@ auto calculate_cip_basis(const FXSpot& spot, const FXForward& forward,
     result.theoretical_forward = S * (1.0 + r_q * t) / (1.0 + r_b * t);
 
     // Implied quote currency rate from forward
-    // F/S = (1 + r_q_implied × t) / (1 + r_b × t)
-    // r_q_implied = ((F/S) × (1 + r_b × t) - 1) / t
+    // F/S = (1 + r_q_implied x t) / (1 + r_b x t)
+    // r_q_implied = ((F/S) x (1 + r_b x t) - 1) / t
     double implied_r_q = ((F / S) * (1.0 + r_b * t) - 1.0) / t;
 
     // CIP basis = implied - actual
@@ -351,8 +105,8 @@ auto calculate_cip_basis(const FXSpot& spot, const FXForward& forward,
     result.round_trip_cost_bps = result.basis_ask - result.basis_bid;
 
     // Arbitrage analysis
-    // If basis_bid > 0: borrow base, lend quote, sell forward → profit
-    // If basis_ask < 0: borrow quote, lend base, buy forward → profit
+    // If basis_bid > 0: borrow base, lend quote, sell forward -> profit
+    // If basis_ask < 0: borrow quote, lend base, buy forward -> profit
     if (result.basis_bid > 0) {
         result.is_exploitable = true;
         result.arb_direction = "borrow_base_lend_quote";
@@ -370,7 +124,7 @@ auto calculate_cip_basis(const FXSpot& spot, const FXForward& forward,
     return result;
 }
 
-// Calculate CIP basis from FX swap
+/// Calculate CIP basis from FX swap
 auto calculate_cip_basis(const FXSwap& swap, const InterestRate& rate_base,
                          const InterestRate& rate_quote) -> CIPBasisResult {
 
@@ -394,7 +148,7 @@ auto calculate_cip_basis(const FXSwap& swap, const InterestRate& rate_base,
     return calculate_cip_basis(spot, forward, rate_base, rate_quote);
 }
 
-// Implied funding rate via cross-currency basis swap
+/// Implied funding rate via cross-currency basis swap
 auto implied_funding_rate(const XCCYBasisSwap& xccy, double domestic_ois_rate) -> double {
     // If you fund in USD and swap to EUR:
     // Effective EUR rate = USD OIS + xccy basis
@@ -407,73 +161,10 @@ auto implied_funding_rate(const XCCYBasisSwap& xccy, double domestic_ois_rate) -
 }
 
 // ============================================================================
-// G10 Currency Utilities
-// ============================================================================
-
-auto g10_pairs() -> vector<std::pair<Currency, Currency>> {
-    return {
-        {Currency::EUR, Currency::USD}, {Currency::GBP, Currency::USD},
-        {Currency::JPY, Currency::USD}, {Currency::CHF, Currency::USD},
-        {Currency::AUD, Currency::USD}, {Currency::CAD, Currency::USD},
-        {Currency::NZD, Currency::USD}, {Currency::NOK, Currency::USD},
-        {Currency::SEK, Currency::USD},
-    };
-}
-
-auto currency_to_string(Currency ccy) -> string {
-    switch (ccy) {
-    case Currency::USD:
-        return "USD";
-    case Currency::EUR:
-        return "EUR";
-    case Currency::GBP:
-        return "GBP";
-    case Currency::JPY:
-        return "JPY";
-    case Currency::CHF:
-        return "CHF";
-    case Currency::AUD:
-        return "AUD";
-    case Currency::CAD:
-        return "CAD";
-    case Currency::NZD:
-        return "NZD";
-    case Currency::NOK:
-        return "NOK";
-    case Currency::SEK:
-        return "SEK";
-    }
-    return "???";
-}
-
-auto string_to_currency(const string& s) -> optional<Currency> {
-    static const std::unordered_map<string, Currency> map = {
-        {"USD", Currency::USD}, {"EUR", Currency::EUR}, {"GBP", Currency::GBP},
-        {"JPY", Currency::JPY}, {"CHF", Currency::CHF}, {"AUD", Currency::AUD},
-        {"CAD", Currency::CAD}, {"NZD", Currency::NZD}, {"NOK", Currency::NOK},
-        {"SEK", Currency::SEK},
-    };
-    auto it = map.find(s);
-    return it != map.end() ? optional{it->second} : std::nullopt;
-}
-
-// ============================================================================
 // Batch G10 Analysis
 // ============================================================================
 
-struct G10BasisSnapshot {
-    ql::Date as_of;
-    string tenor;
-    vector<CIPBasisResult> basis_by_pair;
-
-    // Summary
-    optional<string> richest_pair;  // Most positive basis
-    optional<string> cheapest_pair; // Most negative basis
-    double avg_basis_bps;
-    double basis_dispersion; // Std dev of basis
-};
-
-// Analyze CIP basis across all G10 USD pairs for a given tenor
+/// Analyze CIP basis across all G10 USD pairs for a given tenor
 auto analyze_g10_basis(const ql::Date& as_of, const string& tenor, const vector<FXSpot>& spots,
                        const vector<FXForward>& forwards, const vector<InterestRate>& rates,
                        const InterestRate& usd_rate) -> G10BasisSnapshot {

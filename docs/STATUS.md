@@ -1,104 +1,93 @@
 # fin-kit Status
 
-Last updated: 2026-01-06
+Last updated: 2026-01-08
 
 ## Current State
 
 ### Build System
-- C++20 modules working with LLVM Clang 21 (Homebrew)
+- C++20 modules working with LLVM Clang 21
 - Conan for most deps (DuckDB, spdlog, fmt, tomlplusplus, nlohmann_json)
-- QuantLib 1.40 from Homebrew (Conan's 1.30 has consteval issues with Clang 21)
-- Boost headers from Homebrew (required by QuantLib)
-- All tests passing
+- QuantLib 1.40 built from source with LLVM libc++ (ABI compatibility)
+- Boost headers from Homebrew/Linuxbrew (required by QuantLib)
+- All 19 tests passing
 
 ### Modules Implemented
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| `finkit.core` | Skeleton | Path utils, logging |
-| `finkit.data` | Working | TOML config, DuckDB wrapper, run management |
-| `finkit.curves` | Skeleton | SOFR bootstrap stub, CIP basis **implemented** |
-| `finkit.analysis` | Working | Bond basis, CF calculation, CTD identification |
-| `finkit.backtest` | Placeholder | - |
-| `finkit.viz` | Placeholder | - |
+| Module | Status | Partitions | Notes |
+|--------|--------|------------|-------|
+| `finkit.core` | Working | - | Path utils, logging |
+| `finkit.data` | Working | - | TOML config, DuckDB, InputDataStore/OutputDataStore |
+| `finkit.types` | **Complete** | - | Currency, Bond, FX, Position types |
+| `finkit.bootstrap` | **Complete** | - | SOFR curve, OIS, CB cut probabilities |
+| `finkit.basis` | **Complete** | bond, cip, index | Bond/CIP/Index futures basis |
+| `finkit.stats` | **Complete** | rolling, covariance, signals | Rolling stats, covariance matrices, signal analysis |
+| `finkit.valuation` | **Complete** | bond, swap | Bond/swap valuation with QuantLib |
+| `finkit.curves` | Working | - | Rate accessors, CIP utilities |
+| `finkit.analysis` | Working | - | Bond basket analysis, ranking |
+| `finkit.trading` | **Complete** | types, engine | Orders, fills, execution engine |
+| `finkit.risk` | **Complete** | types, engine | Limits, pre-trade checks, active monitoring |
+| `finkit.backtest` | **Complete** | types, strategy, engine | Full backtest engine with strategies |
+| `finkit.viz` | Placeholder | - | Terminal visualization |
 
-### Key Files
-- `docs/INPUT_REQUIREMENTS.md` - Complete data specs for all calculations
-- `src/curves/curves.cppm` - SOFR + CIP/CCY basis types and functions
-- `src/analysis/analysis.cppm` - Bond basis types and functions
+### Architecture
+- **6 calculation libraries**: bootstrap, basis, curves, analysis, valuation, stats
+- **3 frameworks**: trading, risk, backtest
+- **Proper separation**: Input data (read-only) vs Output data (written by frameworks)
+- **Module partitions**: Large modules split by type for maintainability
+
+### Documentation
+- `docs/architecture.md` - Complete module structure and design principles
+- `docs/roadmap.md` - Implementation phases with checkboxes
+- `docs/FUTURE_WORK.md` - Comprehensive future improvements list
+- `docs/concepts/backtest-lifecycle.md` - Educational guide
+- `docs/guides/writing-a-strategy.md` - Strategy implementation how-to
+- `docs/INPUT_REQUIREMENTS.md` - Data specs for all calculations
+
+### Testing
+- 19 tests passing (core, data, curves, analysis, backtest, viz)
+- Backtest tests include: Portfolio, DataFeed, Engine, Strategy
+- Precise expected value tests for P&L and drawdown calculations
+
+## Key Design Decisions
+
+1. **Calculation modules are stateless**: Pure functions, no framework dependencies
+2. **Conventions as parameters**: Never hardcoded locale/market assumptions
+3. **Multi-currency support**: Portfolio, risk limits in base currency with FX conversion
+4. **Bi-directional risk**: Pre-trade approval AND active monitoring
+5. **Module partitions for file splitting**: Avoid 1500+ line files
 
 ## Open Questions
 
 ### Data Pipeline
-1. **Refinitiv integration** - How does data flow from Refinitiv pipeline toolkit into DuckDB?
-   - Need to define ingestion format/schema
-   - Real-time vs batch?
-
+1. **Data source integration** - How does market data flow into DuckDB?
 2. **Historical data backfill** - How far back? What instruments?
-   - SOFR fixings (2018+)
-   - Treasury prices/yields
-   - FX spots/forwards
 
-### SOFR Curve
-3. **Convexity adjustment** - What model for SR3 futures?
-   - Hull-White?
-   - Market-implied from options?
+### Calculations
+3. **Convexity adjustment** - What model for futures?
+4. **FOMC handling** - Step function between meetings?
+5. **Transaction costs** - Bid/ask spread parameterization
 
-4. **FOMC handling** - How to incorporate meeting dates?
-   - Step function between meetings?
-   - Fed funds futures for implied moves?
-
-### CIP Basis
-5. **Rate source hierarchy** - Which rates for CIP calculation?
-   - OIS preferred, but need consistent tenors across G10
-   - Fallback to repo/deposit rates?
-
-6. **Transaction costs** - What bid/ask spreads are realistic?
-   - Depends on notional size
-   - Need to parameterize
-
-### Bond Basis
-7. **Delivery options** - Priority for implementation?
-   - Quality/switch option most valuable
-   - Need yield vol source
-
-8. **Interim coupons** - How to handle reinvestment?
-   - Assume repo rate reinvestment?
-
-### General
-9. **Time zone handling** - How to reconcile NY close vs London vs Tokyo?
-   - Store everything in UTC?
-   - Convert on display?
-
-10. **Config file location** - Finalize paths
-    - `~/.config/finkit/config.toml` (XDG)
-    - `~/.finkit/config.toml` (simpler)
-    - Currently checks both
+### Infrastructure
+6. **Time zone handling** - UTC storage with display conversion?
+7. **Config file location** - Currently checks XDG and ~/.finkit/
 
 ## Next Steps (Priority Order)
 
-1. **Implement `bootstrap_sofr_curve()`** - Use QuantLib's OISRateHelper
-2. **Add real tests** - Bond basis with known values, CIP with fixture data
-3. **Data ingestion** - Define schema for Refinitiv data
-4. **Backtest engine** - Event loop, position tracking
-
-## Dependencies (Homebrew)
-
-```bash
-brew install llvm quantlib boost ninja
-```
+1. **Visualization module** - Implement terminal charts and reports
+2. **Additional tests** - Integration tests, edge cases
+3. **Concurrency** - Parallel calculations in backtest
+4. **Decimal precision** - Transaction amount accuracy
 
 ## Quick Build
 
 ```bash
-uv sync
-CC=/opt/homebrew/opt/llvm/bin/clang CXX=/opt/homebrew/opt/llvm/bin/clang++ \
-  uv run conan install . --build=missing -of=build \
-  -s compiler=clang -s compiler.version=21 -s compiler.cppstd=20 -s compiler.libcxx=libc++
-
-CC=/opt/homebrew/opt/llvm/bin/clang CXX=/opt/homebrew/opt/llvm/bin/clang++ \
-  cmake --preset conan-release
-
+# Build
 cmake --build build/build/Release
+
+# Test
 ctest --test-dir build/build/Release --output-on-failure
 ```
+
+## Full Setup
+
+See `docs/SETUP.md` for complete environment setup instructions.

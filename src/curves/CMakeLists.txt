@@ -2,8 +2,9 @@ add_library(finkit_curves)
 
 target_sources(finkit_curves PUBLIC FILE_SET CXX_MODULES FILES curves.cppm)
 
-target_link_libraries(finkit_curves PUBLIC finkit::data QuantLib::QuantLib
-                                           Boost::boost spdlog::spdlog)
+target_link_libraries(
+  finkit_curves PUBLIC finkit::types finkit::data finkit::bootstrap
+                       QuantLib::QuantLib Boost::boost spdlog::spdlog)
 
 target_compile_definitions(finkit_curves PUBLIC SPDLOG_FMT_EXTERNAL)
 

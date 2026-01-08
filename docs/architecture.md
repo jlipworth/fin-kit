@@ -7,92 +7,239 @@ fin-kit is a modular C++20 financial analysis toolkit designed for quantitative 
 - **Zero-cost abstractions**: Performance-critical paths use compile-time polymorphism
 - **Modularity**: Each component is independently buildable and testable
 - **Type safety**: Strong typing for financial concepts (prices, quantities, timestamps)
+- **Separation of concerns**: Clear boundaries between data, calculations, and frameworks
+
+## Design Principles
+
+### Calculation Modules are Pure
+- No framework imports
+- Input -> Output functions
+- Stateless
+- Can be used standalone (CLI, notebooks)
+
+### Frameworks Compose Modules
+- Load data from InputDataStore
+- Call calculation module functions
+- Write results to OutputDataStore
+- No circular dependencies
+
+### Conventions as Parameters
+- All calculations take conventions as parameters (day count, calendar, business day convention)
+- Never hardcoded locale or market assumptions
+- ConventionRegistry provides convenience lookups only
 
 ## Module Dependency Graph
 
 ```
-┌─────────┐
-│   viz   │
-└────┬────┘
-     │
-┌────▼────┐
-│backtest │
-└────┬────┘
-     │
-┌────▼────┐
-│analysis │
-└────┬────┘
-     │
-┌────▼────┐
-│  data   │
-└────┬────┘
-     │
-┌────▼────┐
-│  core   │
-└─────────┘
+                          ┌───────────┐
+                          │    viz    │ <-- Reads output tables
+                          └─────┬─────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+      ┌─────▼─────┐       ┌─────▼─────┐       ┌─────▼─────┐
+      │ backtest  │       │   risk    │       │  trading  │
+      └─────┬─────┘       └─────┬─────┘       └─────┬─────┘
+            │                   │                   │
+            └───────────────────┴───────────────────┘
+                                │
+     ┌──────────┬──────────┬────┴────┬──────────┬──────────┐
+     │          │          │         │          │          │
+┌────▼───┐ ┌────▼────┐ ┌───▼───┐ ┌───▼───┐ ┌────▼────┐ ┌───▼────┐
+│bootstrap│ │  basis  │ │curves │ │analysis│ │valuation│ │ stats  │
+└────┬───┘ └────┬────┘ └───┬───┘ └───┬───┘ └────┬────┘ └───┬────┘
+     │          │          │         │          │          │
+     └──────────┴──────────┴────┬────┴──────────┴──────────┘
+                                │
+                          ┌─────▼─────┐
+                          │   types   │
+                          └─────┬─────┘
+                                │
+                          ┌─────▼─────┐
+                          │   data    │
+                          └─────┬─────┘
+                                │
+                          ┌─────▼─────┐
+                          │   core    │
+                          └───────────┘
 ```
+
+## Layer Architecture
+
+### Layer 1: Foundation
+- **finkit.core**: Path utilities, logging, DateTime, Decimal, Result<T,E>
+
+### Layer 2: Data Access
+- **finkit.data**: Database connection, config loading
+  - InputDataStore: Read-only access to market/reference data
+  - OutputDataStore: Write access to calculation results
+
+### Layer 3: Shared Types
+- **finkit.types**: Shared financial types
+  - Currency, OvernightIndex enums
+  - CurrencyConvention
+  - FXSpot, FXForward, InterestRate, XCCYBasisSwap
+  - Bond, FuturesContract, RepoRate
+  - OptionQuote, VolSurface
+
+### Layer 4: Calculation Libraries
+| Module | Purpose | Key Functions |
+|--------|---------|---------------|
+| `finkit.bootstrap` | Curve construction | `bootstrap_sofr_curve()`, `bootstrap_ois_curve()` |
+| `finkit.basis` | Basis calculations | `bond_basis()`, `index_future_basis()`, `cip_basis()` |
+| `finkit.stats` | Statistics | `rolling_stats()`, `covariance()`, `signal_analysis()` |
+| `finkit.valuation` | Fair value | `value_bond()`, `par_rate()`, `value_swap()` |
+| `finkit.curves` | Curve utilities | Rate accessors, CIP basis |
+| `finkit.analysis` | Bond analysis | Basket analysis, ranking |
+
+### Layer 5: Frameworks
+| Module | Purpose | Description |
+|--------|---------|-------------|
+| `finkit.trading` | Order/execution | Order types, fill models, execution engine interface |
+| `finkit.risk` | Risk management | Limits, pre-trade checks, active monitoring |
+| `finkit.backtest` | Simulation | Strategy interface, portfolio, backtest engine |
+
+### Layer 6: Presentation
+- **finkit.viz**: Terminal visualization, charts, reports
 
 ## Module Descriptions
 
 ### core
-
 Foundation library providing:
-
-- **TimeSeries<T>**: Generic time-indexed container with O(1) append, O(log n) lookup
-- **DateTime**: Nanosecond-precision timestamps with timezone support
+- **TimeSeries<T>**: Generic time-indexed container
+- **DateTime**: Nanosecond-precision timestamps
 - **Decimal**: Fixed-point arithmetic for financial calculations
 - **Result<T, E>**: Error handling without exceptions
 
 ### data
+Data handling with input/output separation:
+- **InputDataStore**: Read-only access to market data, rates, bonds, FX
+- **OutputDataStore**: Write access to runs, trades, equity curves, signals
+- **Config**: TOML configuration loading
 
-Market data handling:
+### types
+Shared financial types used across all modules:
+- **Currency**: G10 currency enumeration (USD, EUR, GBP, JPY, etc.)
+- **OvernightIndex**: SOFR, ESTR, SONIA, TONAR, etc.
+- **Bond**: CUSIP, coupon, maturity, price
+- **FXSpot/FXForward**: FX market data types
 
-- **DataSource**: Abstract interface for data providers
-- **Bar**: OHLCV candlestick representation
-- **Tick**: Individual trade/quote records
-- **DataStore**: On-disk storage with memory-mapped access
+### bootstrap
+Curve construction:
+- SOFR OIS curve bootstrapping
+- Central bank cut probability calculation
+- Interpolation methods (log-linear, cubic spline)
 
-### analysis
+### basis
+Basis and spread calculations:
+- **Bond basis**: Gross/net basis, implied repo, CTD identification
+- **CIP basis**: Cross-currency basis vs OIS
+- **Index futures basis**: Fair value vs market
 
-Technical analysis and statistics:
+### stats
+Statistical functions:
+- Rolling statistics (mean, std, z-score, EWMA)
+- Covariance/correlation matrices
+- Signal analysis (IC, hit ratio, turnover)
 
-- **Indicator<T>**: Base class for streaming indicators
-- **MovingAverage, RSI, MACD, etc.**: Common technical indicators
-- **Statistics**: Rolling statistics, correlation, regression
-- **Signal**: Signal generation and combination
+### valuation
+Fair value calculations:
+- Bond valuation (clean/dirty price, yield, z-spread)
+- Swap valuation (par rate, NPV, DV01)
+
+### trading
+Order and execution management:
+- **Order/Fill types**: Market, limit, stop orders
+- **IExecutionEngine**: Swappable execution (backtest, paper, live)
+- **IFillModel**: CloseFill, NextBarOpen, VWAP models
+
+### risk
+Risk management framework:
+- **Pre-trade checks**: Position limits, concentration
+- **Active monitoring**: Drawdown, exposure, VaR limits
+- **Breach policies**: Reject, reduce, liquidate, halt
 
 ### backtest
-
-Event-driven backtesting engine:
-
-- **Engine**: Main simulation loop with event dispatch
-- **Strategy**: User-defined trading logic interface
-- **Portfolio**: Position and P&L tracking
-- **Execution**: Order matching and fill simulation
-- **Risk**: Position limits, drawdown controls
+Event-driven backtesting:
+- **BacktestEngine**: Main simulation loop
+- **IStrategy**: User-defined trading logic interface
+- **Portfolio**: Multi-currency position and P&L tracking
+- **IDataFeed**: Historical data feed interface
 
 ### viz
-
-Terminal visualization:
-
-- **Chart**: ASCII/Unicode price charts
-- **Table**: Formatted data tables
-- **Report**: Performance reporting
+Visualization (placeholder):
+- Charts, tables, performance reports
 
 ## Threading Model
 
 - Single-threaded by default for deterministic backtests
-- Optional parallel indicator calculation via thread pool
+- Future: Parallel calculation support for independent computations
 - Lock-free queues for data ingestion
 
 ## Memory Management
 
 - Arena allocators for temporary calculations
-- Memory-mapped files for large datasets
+- Memory-mapped files for large datasets (DuckDB)
 - RAII throughout, no raw new/delete
 
 ## Error Handling
 
-- `Result<T, E>` for recoverable errors
+- `std::optional` for absent values
+- Exceptions for unrecoverable errors only
 - Assertions for invariant violations
-- No exceptions in hot paths
+
+## Data Flow
+
+```
+Input Tables ──► Calculation Modules ──► Output Tables ──► Viz
+     │                   │                     │
+     │                   ▼                     │
+     │            Frameworks (backtest,        │
+     └───────────► risk, trading) ─────────────┘
+```
+
+## Key Interfaces
+
+### IInstrument
+Abstract instrument interface for asset-class agnostic design:
+```cpp
+class IInstrument {
+    virtual auto symbol() const -> string = 0;
+    virtual auto asset_class() const -> AssetClass = 0;
+    virtual auto currency() const -> Currency = 0;
+    virtual auto multiplier() const -> double = 0;
+};
+```
+
+### IExecutionEngine
+Swappable execution:
+```cpp
+class IExecutionEngine {
+    virtual auto submit_order(const Order& order) -> OrderId = 0;
+    virtual auto cancel_order(OrderId id) -> bool = 0;
+    virtual void on_bar(const BarEvent& bar) = 0;
+};
+```
+
+### IRiskEngine
+Bi-directional risk management:
+```cpp
+class IRiskEngine {
+    // Mode 1: Pre-trade approval (trading engine asks)
+    virtual auto check_pre_trade(const Order&, const Portfolio&, const IFXRateProvider&) -> RiskCheckResult = 0;
+
+    // Mode 2: Active monitoring (risk engine watches)
+    virtual auto monitor(const Portfolio&, const IFXRateProvider&, Timestamp) -> vector<RiskActionEvent> = 0;
+};
+```
+
+### IStrategy
+User-implemented trading logic:
+```cpp
+class IStrategy {
+    virtual auto name() const -> string = 0;
+    virtual void on_bar(const BarEvent& bar, StrategyContext& ctx) = 0;
+    virtual void on_fill(const Fill& fill, StrategyContext& ctx) {}
+    virtual void on_risk_action(const RiskActionEvent& event, StrategyContext& ctx) {}
+};
+```
