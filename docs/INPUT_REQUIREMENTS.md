@@ -16,11 +16,30 @@ These define what must be available from the database or market data feeds.
 ### Purpose
 Calculate gross/net basis, implied repo, and identify CTD for Treasury futures.
 
-### Formula
+### Key Insight: Repo Rates, Not Yield Curves
+Bond basis analysis compares **implied repo** against **actual repo rates** - it does NOT
+require a bootstrapped yield curve. The core calculation is a financing arbitrage:
+
 ```
-Basis = Cash_Price - (Futures_Price × Conversion_Factor)
+Buy bond + Sell futures + Repo finance = Basis trade
+
+Implied_Repo = [(Futures_Invoice / Cash_Full_Price) - 1] × (360 / days_to_delivery)
+
+Trade PnL = Implied_Repo - Actual_Repo_Rate
+```
+
+If implied repo > actual repo → buy basis (long bond, short futures)
+If implied repo < actual repo → sell basis (short bond, long futures)
+
+### Formulas
+```
+Gross_Basis = Cash_Price - (Futures_Price × Conversion_Factor)
 Net_Basis = Gross_Basis - Carry
-Implied_Repo = ((Invoice_Price / Purchase_Price) - 1) × (360 / days)
+Carry = (Coupon_Income - Financing_Cost) to delivery
+Implied_Repo = [(Invoice_Price / Purchase_Price) - 1] × (360 / days)
+
+Invoice_Price = Futures_Price × CF + Accrued_at_Delivery
+Purchase_Price = Clean_Price + Accrued_at_Settlement + Financing
 ```
 
 ### Required Inputs
@@ -74,15 +93,34 @@ where:
   c = annual coupon rate
 ```
 
-#### 1.4 Repo/Financing Data
+#### 1.4 Repo/Financing Data (Critical for Basis)
+This is the core data for basis trade valuation - compare implied repo to these rates.
+
 | Field | Type | Description | Source |
 |-------|------|-------------|--------|
-| `repo_rate` | double | Term repo rate to delivery | Market data |
-| `gc_rate` | double | General collateral rate | Market data |
-| `special_rate` | double | Issue-specific repo rate (if special) | Market data |
-| `haircut` | double | Repo margin/haircut | Convention |
+| `term_repo_rate` | double | Term repo rate to delivery date | Market data / broker |
+| `gc_rate` | double | Treasury General Collateral rate | DTCC GCF, NY Fed |
+| `sofr_rate` | double | SOFR (proxy for overnight GC) | NY Fed |
+| `special_rate` | double | Issue-specific repo if "on special" | Market data |
+| `repo_tenor_days` | int | Days for term repo (match to delivery) | Calculated |
+| `haircut` | double | Repo margin/haircut (typically 2%) | Convention |
+| `is_special` | bool | Is issue trading special? | Market data |
 
-#### 1.5 Delivery Option Inputs (Advanced)
+**Repo Rate Hierarchy**:
+1. **Term repo to delivery** (ideal) - lock in financing to futures delivery
+2. **GC repo rate** - general collateral, roll overnight/term
+3. **SOFR** - overnight proxy, need to estimate term spread
+4. **Fed funds** - less relevant post-2008
+
+**Special Issues**: When a bond is "on special" (high demand for borrowing),
+the special repo rate can be significantly below GC. This affects basis
+calculations - a bond on special has higher carry, lower net basis.
+
+#### 1.5 Delivery Option Inputs (Advanced - Requires Yield Curve)
+**Note**: These are only needed for advanced delivery option valuation,
+NOT for basic implied repo / CTD analysis. Most basis traders focus on
+implied repo vs actual repo without modeling delivery options explicitly.
+
 | Field | Type | Description | Source |
 |-------|------|-------------|--------|
 | `yield_curve` | curve | Full Treasury yield curve | Bootstrapped |
@@ -90,6 +128,12 @@ where:
 | `switch_option_value` | double | Quality/switch option value | Model |
 | `timing_option_value` | double | Delivery timing option value | Model |
 | `eom_option_value` | double | End-of-month option value | Model |
+
+**When you need this**: If you want to decompose net basis into:
+- Carry
+- Quality option (right to deliver any eligible bond)
+- Timing option (right to choose delivery date)
+- End-of-month option (wild card)
 
 ### Outputs
 - Conversion factor per bond
@@ -364,6 +408,22 @@ CREATE TABLE fx_forwards (
     forward_points_ask DOUBLE,
     forward_points_mid DOUBLE,
     PRIMARY KEY (base_ccy, quote_ccy, tenor, as_of)
+);
+
+-- Repo Rates (Critical for Bond Basis)
+CREATE TABLE repo_rates (
+    as_of DATE,
+    rate_type VARCHAR(20),  -- GC, SOFR, TERM_1W, TERM_1M, etc.
+    rate DOUBLE,
+    PRIMARY KEY (as_of, rate_type)
+);
+
+CREATE TABLE repo_specials (
+    cusip VARCHAR(9),
+    as_of DATE,
+    special_rate DOUBLE,
+    gc_spread DOUBLE,  -- special - GC (negative = on special)
+    PRIMARY KEY (cusip, as_of)
 );
 
 -- Interest Rates

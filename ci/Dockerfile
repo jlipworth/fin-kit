@@ -1,33 +1,23 @@
-FROM ubuntu:24.04
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV QUANTLIB_VERSION=1.40
+ENV INSTALL_PREFIX=/usr/local
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    ninja-build \
-    python3 \
-    python3-pip \
-    python3-venv \
-    git \
-    curl \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+# Copy and run build script
+COPY ci/build-deps.sh /tmp/build-deps.sh
+RUN chmod +x /tmp/build-deps.sh && /tmp/build-deps.sh && rm /tmp/build-deps.sh
 
-# Install GCC 14 for C++20 support
-RUN apt-get update && apt-get install -y \
-    gcc-14 \
-    g++-14 \
-    && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
-
-# Create virtual environment and install Conan
+# Set up Python venv for Conan/pre-commit
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip && pip install conan pre-commit
 
-# Configure Conan
+# Configure Conan with Clang profile
 RUN conan profile detect --force
+
+# Library paths
+ENV LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}"
+ENV PKG_CONFIG_PATH="${INSTALL_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}"
 
 WORKDIR /workspace

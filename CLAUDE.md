@@ -74,6 +74,24 @@ Module interface units are `.cppm` files in each module's directory:
 - Non-module headers (std library, external deps) go in the global module fragment
 - All public APIs require documentation comments
 
+### Namespace Aliases and Using Declarations
+
+For readability, use these standard aliases in all modules:
+
+```cpp
+// At the top of each module's export namespace
+namespace ql = QuantLib;  // Always alias QuantLib as ql
+
+using std::optional;
+using std::string;
+using std::vector;
+```
+
+This keeps code readable without excessive verbosity:
+- `ql::Date` instead of `QuantLib::Date`
+- `ql::Handle<ql::YieldTermStructure>` instead of the full form
+- `vector<Bond>` instead of `std::vector<Bond>`
+
 ## Testing
 
 - Tests live in `tests/` mirroring `src/` structure
