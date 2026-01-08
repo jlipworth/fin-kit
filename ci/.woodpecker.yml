@@ -10,10 +10,19 @@ steps:
       path:
         - "ci/Dockerfile"
 
+  check-lockfile:
+    image: *image
+    commands:
+      - uv sync --locked
+
   install-deps:
     image: *image
     commands:
-      - conan install . --build=missing -of=build
+      - uv sync
+      - uv run conan profile detect --force
+      - uv run conan install . --build=missing -of=build
+    depends_on:
+      - check-lockfile
 
   build-release:
     image: *image
@@ -33,9 +42,10 @@ steps:
   lint:
     image: *image
     commands:
-      - pre-commit run --all-files
+      - uv sync
+      - uv run pre-commit run --all-files
     depends_on:
-      - install-deps
+      - check-lockfile
 
   build-debug:
     image: *image

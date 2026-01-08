@@ -8,13 +8,9 @@ ENV INSTALL_PREFIX=/usr/local
 COPY ci/build-deps.sh /tmp/build-deps.sh
 RUN chmod +x /tmp/build-deps.sh && /tmp/build-deps.sh && rm /tmp/build-deps.sh
 
-# Set up Python venv for Conan/pre-commit
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --upgrade pip && pip install conan pre-commit
-
-# Configure Conan with Clang profile
-RUN conan profile detect --force
+# Install uv (Python deps installed at runtime via uv sync)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 # Library paths
 ENV LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}"
