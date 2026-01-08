@@ -17,15 +17,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
 endif()
 
-# Homebrew paths for macOS (QuantLib, Boost)
+# Homebrew paths for macOS (Boost only - QuantLib must be built with LLVM
+# libc++)
 if(APPLE)
   execute_process(
     COMMAND brew --prefix
     OUTPUT_VARIABLE HOMEBREW_PREFIX
     OUTPUT_STRIP_TRAILING_WHITESPACE)
   list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
-  set(ENV{PKG_CONFIG_PATH}
-      "${HOMEBREW_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
 
   # Boost headers for QuantLib (brew install boost)
   execute_process(
@@ -35,17 +34,14 @@ if(APPLE)
   set(BOOST_ROOT "${BOOST_PREFIX}")
 endif()
 
-# QuantLib from Homebrew via pkg-config (brew install quantlib) Note: QuantLib's
-# pkg-config sets -std=c++17 which would override our C++20. We create a custom
-# interface target with only include/link dirs.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(QuantLib REQUIRED quantlib)
-
-add_library(QuantLib::QuantLib INTERFACE IMPORTED)
-target_include_directories(QuantLib::QuantLib
-                           INTERFACE ${QuantLib_INCLUDE_DIRS})
-target_link_directories(QuantLib::QuantLib INTERFACE ${QuantLib_LIBRARY_DIRS})
-target_link_libraries(QuantLib::QuantLib INTERFACE ${QuantLib_LIBRARIES})
+# QuantLib built with LLVM libc++ (see scripts/build-quantlib.sh) IMPORTANT:
+# Homebrew's QuantLib uses system libc++ which is ABI-incompatible with LLVM's
+# libc++. We must use a custom build.
+set(QUANTLIB_ROOT
+    "$ENV{HOME}/.local/quantlib-llvm"
+    CACHE PATH "QuantLib install prefix")
+list(PREPEND CMAKE_PREFIX_PATH "${QUANTLIB_ROOT}")
+find_package(QuantLib 1.40 REQUIRED)
 
 # Boost headers (required by QuantLib)
 find_package(Boost REQUIRED)
@@ -84,3 +80,8 @@ add_subdirectory(apps)
 
 # Tests
 add_subdirectory(tests)
+
+# Scratch/validation scripts (untracked, optional)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scratch/CMakeLists.txt")
+  add_subdirectory(scratch)
+endif()

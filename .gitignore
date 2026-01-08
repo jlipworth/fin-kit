@@ -27,3 +27,6 @@ Thumbs.db
 
 # Debug
 *.dSYM/
+
+# Scratch/validation scripts (untracked)
+scratch/

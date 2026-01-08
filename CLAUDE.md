@@ -6,10 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ```bash
 # Prerequisites (macOS)
-brew install llvm quantlib boost ninja
+brew install llvm boost ninja
 
 # Set up Python environment (first time)
 uv sync
+
+# Build QuantLib with LLVM libc++ (REQUIRED - see note below)
+./scripts/build-quantlib.sh
 
 # Install Conan dependencies (use LLVM Clang for C++20 modules)
 CC=/opt/homebrew/opt/llvm/bin/clang \
@@ -32,6 +35,15 @@ ctest --test-dir build/build/Release --output-on-failure
 # Run specific test
 ctest --test-dir build/build/Release -R <test_name> --output-on-failure
 ```
+
+### Why Build QuantLib from Source?
+
+Homebrew's QuantLib links against Apple's system libc++ (`/usr/lib/libc++.1.dylib`).
+fin-kit uses LLVM Clang with LLVM's libc++ (`/opt/homebrew/opt/llvm/lib/c++/libc++.1.dylib`)
+for C++20 modules support. These are **ABI-incompatible** - mixing them causes runtime crashes.
+
+The `scripts/build-quantlib.sh` script builds QuantLib from source using LLVM's toolchain,
+installing to `~/.local/quantlib-llvm/`. This ensures everything links against the same libc++.
 
 ## Architecture
 
@@ -104,9 +116,13 @@ This keeps code readable without excessive verbosity:
 
 ### Homebrew (macOS)
 - **llvm** - LLVM Clang 21+ (required for C++20 modules)
-- **quantlib** - Bond pricing (Conan's version has consteval issues with Clang 21)
 - **boost** - Headers required by QuantLib
 - **ninja** - Build system (required for C++20 module scanning)
+
+### Built from Source
+- **QuantLib 1.40** - Built with LLVM libc++ via `scripts/build-quantlib.sh`
+  - DO NOT use Homebrew's QuantLib (ABI incompatible with LLVM libc++)
+  - Installed to `~/.local/quantlib-llvm/`
 
 ### Conan
 - DuckDB (data storage)
