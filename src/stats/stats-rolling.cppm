@@ -287,7 +287,8 @@ auto rolling_percentile_rank(span<const double> data, size_t window) -> vector<d
     const size_t n = data.size();
     vector<double> result(n, std::numeric_limits<double>::quiet_NaN());
 
-    if (n < window || window == 0)
+    // Need at least 2 observations for percentile rank (divides by window - 1)
+    if (n < window || window <= 1)
         return result;
 
     for (size_t i = window - 1; i < n; ++i) {

@@ -544,16 +544,16 @@ struct RunInfo {
 
 auto start_run(OutputDataStore& db, string_view name, string_view git_commit = "",
                string_view config_json = "{}") -> string {
-    auto result = db.query(fmt::format(
+    auto result = db.execute(
         R"(
         INSERT INTO runs (name, git_commit, config)
-        VALUES ('{}', '{}', '{}')
+        VALUES ($1, $2, $3)
         RETURNING run_id::VARCHAR
         )",
-        name, git_commit, config_json));
+        string{name}, string{git_commit}, string{config_json});
 
-    if (result->HasError()) {
-        spdlog::error("Failed to start run: {}", result->GetError());
+    if (!result || result->HasError()) {
+        spdlog::error("Failed to start run: {}", result ? result->GetError() : "null result");
         return "";
     }
 
@@ -567,16 +567,16 @@ auto start_run(OutputDataStore& db, string_view name, string_view git_commit = "
 // Overload for backward compatibility with Database class
 auto start_run(Database& db, string_view name, string_view git_commit = "",
                string_view config_json = "{}") -> string {
-    auto result = db.query(fmt::format(
+    auto result = db.execute(
         R"(
         INSERT INTO runs (name, git_commit, config)
-        VALUES ('{}', '{}', '{}')
+        VALUES ($1, $2, $3)
         RETURNING run_id::VARCHAR
         )",
-        name, git_commit, config_json));
+        string{name}, string{git_commit}, string{config_json});
 
-    if (result->HasError()) {
-        spdlog::error("Failed to start run: {}", result->GetError());
+    if (!result || result->HasError()) {
+        spdlog::error("Failed to start run: {}", result ? result->GetError() : "null result");
         return "";
     }
 
@@ -588,23 +588,21 @@ auto start_run(Database& db, string_view name, string_view git_commit = "",
 }
 
 void complete_run(OutputDataStore& db, string_view run_id) {
-    db.query(fmt::format("UPDATE runs SET status = 'completed' WHERE run_id = '{}'", run_id));
+    db.execute("UPDATE runs SET status = 'completed' WHERE run_id = $1", string{run_id});
 }
 
 void complete_run(Database& db, string_view run_id) {
-    db.query(fmt::format("UPDATE runs SET status = 'completed' WHERE run_id = '{}'", run_id));
+    db.execute("UPDATE runs SET status = 'completed' WHERE run_id = $1", string{run_id});
 }
 
 void fail_run(OutputDataStore& db, string_view run_id, string_view error_msg = "") {
-    db.query(
-        fmt::format("UPDATE runs SET status = 'failed', description = '{}' WHERE run_id = '{}'",
-                    error_msg, run_id));
+    db.execute("UPDATE runs SET status = 'failed', description = $1 WHERE run_id = $2",
+               string{error_msg}, string{run_id});
 }
 
 void fail_run(Database& db, string_view run_id, string_view error_msg = "") {
-    db.query(
-        fmt::format("UPDATE runs SET status = 'failed', description = '{}' WHERE run_id = '{}'",
-                    error_msg, run_id));
+    db.execute("UPDATE runs SET status = 'failed', description = $1 WHERE run_id = $2",
+               string{error_msg}, string{run_id});
 }
 
 // ============================================================================

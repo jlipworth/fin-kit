@@ -8,6 +8,7 @@ module;
 #include <cmath>
 #include <optional>
 #include <ql/quantlib.hpp>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <vector>
 
@@ -181,6 +182,7 @@ auto value_ois_swap(const OISSwapSpec& spec,
         result.dv01 = std::abs(swap_bumped.NPV() - swap.NPV());
 
     } catch (const std::exception& e) {
+        spdlog::warn("OIS swap valuation failed for {}Y tenor: {}", spec.tenor_years, e.what());
         // Return default values on error
     }
 

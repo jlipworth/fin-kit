@@ -81,6 +81,20 @@ auto calculate_cip_basis(const FXSpot& spot, const FXForward& forward,
     double r_b = rate_base.rate_mid;
     double r_q = rate_quote.rate_mid;
 
+    // Guard against division by zero (same date forward)
+    if (t <= 0.0) {
+        result.theoretical_forward = S;
+        result.cip_basis_bps = 0.0;
+        result.annualized_basis = 0.0;
+        result.basis_bid = 0.0;
+        result.basis_ask = 0.0;
+        result.round_trip_cost_bps = 0.0;
+        result.is_exploitable = false;
+        result.arb_direction = "none";
+        result.arb_pnl_per_million = 0.0;
+        return result;
+    }
+
     // Theoretical forward (CIP condition)
     result.theoretical_forward = S * (1.0 + r_q * t) / (1.0 + r_b * t);
 

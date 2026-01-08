@@ -117,6 +117,11 @@ auto calculate_covariance_matrix(const vector<vector<double>>& returns,
 
     const size_t n_obs = returns[0].size();
 
+    // Need at least 2 observations for sample covariance (divides by n_obs - 1)
+    if (n_obs <= 1) {
+        return CovarianceMatrix{};
+    }
+
     // Compute means
     vector<double> means(n_assets, 0.0);
     for (size_t i = 0; i < n_assets; ++i) {

@@ -18,11 +18,15 @@ namespace fs = std::filesystem;
 // Path utilities
 // ============================================================================
 
-auto expand_path(fs::path p) -> fs::path {
+[[nodiscard]] auto expand_path(fs::path p) -> fs::path {
     if (!p.empty() && p.native()[0] == '~') {
         const char* home = std::getenv("HOME");
         if (home != nullptr) {
-            return fs::path{home} / p.native().substr(2);
+            if (p.native().size() == 1) {
+                return fs::path{home}; // Just "~"
+            } else if (p.native().size() > 1 && p.native()[1] == '/') {
+                return fs::path{home} / p.native().substr(2); // "~/something"
+            }
         }
     }
     return p;

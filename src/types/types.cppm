@@ -56,7 +56,7 @@ struct CurrencyConvention {
 };
 
 /// Get market convention for a currency
-auto get_convention(Currency ccy) -> CurrencyConvention {
+[[nodiscard]] auto get_convention(Currency ccy) -> CurrencyConvention {
     switch (ccy) {
     case Currency::USD:
         return {ccy, OvernightIndex::SOFR, ql::Actual360(), 2, 0.0001};
@@ -92,7 +92,7 @@ enum class AssetClass { Equity, Bond, Future, FX, Option, Swap, ETF, Index, Comm
 // Currency Utilities
 // ============================================================================
 
-auto g10_pairs() -> vector<std::pair<Currency, Currency>> {
+[[nodiscard]] auto g10_pairs() -> vector<std::pair<Currency, Currency>> {
     return {
         {Currency::EUR, Currency::USD}, {Currency::GBP, Currency::USD},
         {Currency::JPY, Currency::USD}, {Currency::CHF, Currency::USD},
@@ -102,7 +102,7 @@ auto g10_pairs() -> vector<std::pair<Currency, Currency>> {
     };
 }
 
-auto currency_to_string(Currency ccy) -> string {
+[[nodiscard]] auto currency_to_string(Currency ccy) -> string {
     switch (ccy) {
     case Currency::USD:
         return "USD";
@@ -128,7 +128,7 @@ auto currency_to_string(Currency ccy) -> string {
     return "???";
 }
 
-auto string_to_currency(const string& s) -> optional<Currency> {
+[[nodiscard]] auto string_to_currency(const string& s) -> optional<Currency> {
     static const std::unordered_map<string, Currency> map = {
         {"USD", Currency::USD}, {"EUR", Currency::EUR}, {"GBP", Currency::GBP},
         {"JPY", Currency::JPY}, {"CHF", Currency::CHF}, {"AUD", Currency::AUD},

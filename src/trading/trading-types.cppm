@@ -23,9 +23,9 @@ using std::optional;
 using std::string;
 using std::vector;
 
+using finkit::types::AssetClass;
 using finkit::types::Currency;
-
-using Timestamp = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
+using finkit::types::Timestamp;
 
 // ============================================================================
 // Order Types
@@ -230,8 +230,6 @@ private:
 // ============================================================================
 // Instrument Abstraction
 // ============================================================================
-
-enum class AssetClass { Equity, Bond, Future, FX, Option, Swap, ETF, Index, Commodity, Crypto };
 
 /// Abstract instrument interface
 class IInstrument {

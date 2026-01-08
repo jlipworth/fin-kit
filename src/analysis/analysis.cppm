@@ -90,7 +90,7 @@ auto gross_basis(const Bond& bond, const FuturesContract& futures, double cf) ->
 }
 
 /// Convert basis to 32nds
-auto to_32nds(double decimal_price) -> double {
+[[nodiscard]] constexpr auto to_32nds(double decimal_price) noexcept -> double {
     return decimal_price * 32.0;
 }
 

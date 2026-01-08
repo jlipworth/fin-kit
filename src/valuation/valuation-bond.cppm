@@ -10,6 +10,7 @@ module;
 #include <optional>
 #include <ql/quantlib.hpp>
 #include <span>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <vector>
 
@@ -91,6 +92,8 @@ auto value_bond(const Bond& bond, const ql::Handle<ql::YieldTermStructure>& disc
 
     try {
         // Set evaluation date
+        // NOTE: QuantLib Settings is a global singleton. Multi-threaded usage
+        // requires external synchronization or per-thread evaluation dates.
         ql::Settings::instance().evaluationDate() = settlement_date;
 
         // Build QuantLib bond
@@ -124,7 +127,8 @@ auto value_bond(const Bond& bond, const ql::Handle<ql::YieldTermStructure>& disc
         // DV01: dollar value of 1bp yield change
         result.dv01 = result.modified_duration * result.dirty_price / 10000.0;
 
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        spdlog::warn("Bond valuation failed for {}: {}", bond.cusip, e.what());
         // Return partial result on error
         result.clean_price = bond.clean_price;
     }
@@ -163,7 +167,8 @@ auto value_bond_from_price(const Bond& bond, double market_price,
         result.convexity = ql::BondFunctions::convexity(ql_bond, yield_rate, settlement_date);
         result.dv01 = result.modified_duration * result.dirty_price / 10000.0;
 
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        spdlog::warn("Bond valuation from price failed for {}: {}", bond.cusip, e.what());
         result.clean_price = market_price;
     }
 
@@ -187,7 +192,8 @@ auto calculate_z_spread(const Bond& bond, const ql::Handle<ql::YieldTermStructur
             ql::Semiannual, settlement_date);
 
         return z_spread * 10000.0; // Convert to bps
-    } catch (...) {
+    } catch (const std::exception& e) {
+        spdlog::warn("Z-spread calculation failed for {}: {}", bond.cusip, e.what());
         return 0.0;
     }
 }
@@ -232,7 +238,8 @@ auto calculate_roll_down(const BondValuation& valuation,
         // Price change from yield change
         double yield_change = rolled_yield - current_yield;
         return -valuation.modified_duration * valuation.dirty_price * yield_change;
-    } catch (...) {
+    } catch (const std::exception& e) {
+        spdlog::warn("Roll-down calculation failed for {}: {}", valuation.cusip, e.what());
         return 0.0;
     }
 }
