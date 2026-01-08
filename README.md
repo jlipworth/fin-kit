@@ -12,22 +12,19 @@ A modern C++20 financial analysis toolkit for quantitative research and backtest
 
 ## Requirements
 
-- C++20 compatible compiler (GCC 12+, Clang 15+, MSVC 2022+)
+- **LLVM Clang 21+** with libc++ (required for C++20 modules)
 - CMake 3.25+
+- Ninja
 - Conan 2.x
 
 ## Building
 
+See **[docs/SETUP.md](docs/SETUP.md)** for detailed setup instructions (macOS and Linux).
+
+Quick start (after setup):
 ```bash
-# Install dependencies
-conan install . --build=missing -of=build
-
-# Configure and build
-cmake --preset conan-release
-cmake --build build --config Release
-
-# Run tests
-ctest --test-dir build --output-on-failure
+cmake --build build/build/Release
+ctest --test-dir build/build/Release --output-on-failure
 ```
 
 ## Project Structure
@@ -59,4 +56,7 @@ cmake --build build --config Debug
 
 ## Documentation
 
-See [docs/architecture.md](docs/architecture.md) for design details and [docs/roadmap.md](docs/roadmap.md) for planned features.
+- [docs/SETUP.md](docs/SETUP.md) - Environment setup (macOS/Linux)
+- [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) - Dependency management and Renovatebot
+- [docs/architecture.md](docs/architecture.md) - Design details
+- [docs/roadmap.md](docs/roadmap.md) - Planned features

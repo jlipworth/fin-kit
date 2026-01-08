@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+
+  "packageRules": [
+    {
+      "description": "Group all C++ dependencies",
+      "matchManagers": ["regex"],
+      "matchFileNames": ["conanfile.py", "scripts/build-quantlib.sh", "CMakeLists.txt"],
+      "groupName": "C++ dependencies"
+    }
+  ],
+
+  "regexManagers": [
+    {
+      "fileMatch": ["^conanfile\\.py$"],
+      "matchStrings": [
+        "self\\.requires\\(\"(?<depName>[^/]+)/(?<currentValue>[^\"]+)\"\\)"
+      ],
+      "datasourceTemplate": "conan"
+    },
+    {
+      "fileMatch": ["^scripts/build-quantlib\\.sh$"],
+      "matchStrings": [
+        "QUANTLIB_VERSION=\"?\\$\\{QUANTLIB_VERSION:-(?<currentValue>[^}]+)\\}"
+      ],
+      "depNameTemplate": "lballabio/QuantLib",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "fileMatch": ["^CMakeLists\\.txt$"],
+      "matchStrings": [
+        "GIT_TAG\\s+(?<currentValue>v[\\d.]+)"
+      ],
+      "depNameTemplate": "google/googletest",
+      "datasourceTemplate": "github-tags"
+    }
+  ]
+}

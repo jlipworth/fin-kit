@@ -21,8 +21,16 @@ class FinkitConan(ConanFile):
     def generate(self):
         tc = CMakeToolchain(self, generator="Ninja")
         # Use LLVM's libc++ instead of system libc++ to avoid ABI issues
-        llvm_lib = "/opt/homebrew/opt/llvm/lib/c++"
-        if os.path.exists(llvm_lib):
+        # Platform-specific paths for LLVM
+        import platform
+        if platform.system() == "Darwin":
+            llvm_lib = "/opt/homebrew/opt/llvm/lib/c++"
+        elif platform.system() == "Linux":
+            llvm_lib = "/home/linuxbrew/.linuxbrew/opt/llvm/lib"
+        else:
+            llvm_lib = None
+
+        if llvm_lib and os.path.exists(llvm_lib):
             tc.variables["CMAKE_EXE_LINKER_FLAGS"] = f"-L{llvm_lib} -Wl,-rpath,{llvm_lib}"
             tc.variables["CMAKE_SHARED_LINKER_FLAGS"] = f"-L{llvm_lib} -Wl,-rpath,{llvm_lib}"
         tc.generate()

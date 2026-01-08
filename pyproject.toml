@@ -2,7 +2,7 @@
 name = "finkit-dev"
 version = "0.1.0"
 description = "Development dependencies for fin-kit"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "conan>=2.0",
     "pre-commit>=3.0",
