@@ -8,6 +8,7 @@
 /// - finkit.stats:rolling    - Rolling window statistics
 /// - finkit.stats:covariance - Covariance/correlation matrices
 /// - finkit.stats:signals    - Signal analysis and quality metrics
+/// - finkit.stats:returns    - Return-based performance metrics
 ///
 /// @see docs/modules/stats.md for documentation
 
@@ -22,3 +23,4 @@ export module finkit.stats;
 export import :rolling;
 export import :covariance;
 export import :signals;
+export import :returns;

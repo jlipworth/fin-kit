@@ -7,6 +7,7 @@
 
 module;
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <deque>
@@ -97,12 +98,11 @@ private:
         double delta = (new_val - old_val) / static_cast<double>(window_size_);
         mean_ += delta;
 
-        // Recalculate M2 (variance * (n-1)) from scratch for accuracy
-        m2_ = 0.0;
-        for (size_t i = 0; i < window_size_; ++i) {
-            double d = values_[i] - mean_;
-            m2_ += d * d;
-        }
+        // Recalculate M2 using Eigen for vectorization and numerical stability
+        const auto n = static_cast<Eigen::Index>(window_size_);
+        Eigen::Map<const Eigen::VectorXd> v(values_.data(), n);
+        Eigen::VectorXd centered = v.array() - mean_;
+        m2_ = centered.squaredNorm();
     }
 
     size_t window_size_;

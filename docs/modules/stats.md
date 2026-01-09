@@ -7,11 +7,12 @@ signal quality assessment.
 
 The `finkit.stats` module provides efficient rolling window calculations,
 covariance/correlation matrix estimation, and trading signal analysis tools.
-It is organized into three partitions:
+It is organized into four partitions:
 
 - `:rolling` - Rolling window statistics
 - `:covariance` - Covariance and correlation matrices
 - `:signals` - Signal quality metrics
+- `:returns` - Return-based performance metrics
 
 ## Rolling Statistics
 
@@ -111,6 +112,50 @@ auto calculate_pacf(span<const double> data, size_t max_lag) -> vector<double>;
 auto test_stationarity(span<const double> data) -> StationarityResult;
 ```
 
+## Return Metrics
+
+### ReturnMetrics
+
+```cpp
+struct ReturnMetrics {
+    double total_return;        // Cumulative return
+    double annualized_return;   // CAGR
+    double sharpe_ratio;        // Risk-adjusted return (vs risk-free)
+    double sortino_ratio;       // Downside risk-adjusted return
+    double calmar_ratio;        // Return / max drawdown
+    double volatility;          // Annualized std dev
+    double downside_vol;        // Annualized downside std dev
+    double max_drawdown;        // Maximum peak-to-trough decline
+    double skewness;            // Return distribution skewness
+    double kurtosis;            // Return distribution kurtosis (excess)
+    size_t observations;
+};
+```
+
+### Functions
+
+```cpp
+auto sharpe_ratio(span<const double> returns,
+                  double risk_free_rate = 0.0,
+                  double periods_per_year = 252.0) -> double;
+
+auto sortino_ratio(span<const double> returns,
+                   double target_return = 0.0,
+                   double periods_per_year = 252.0) -> double;
+
+auto calmar_ratio(span<const double> returns,
+                  double periods_per_year = 252.0) -> double;
+
+auto max_drawdown(span<const double> returns) -> double;
+
+auto annualized_volatility(span<const double> returns,
+                           double periods_per_year = 252.0) -> double;
+
+auto calculate_return_metrics(span<const double> returns,
+                              double risk_free_rate = 0.0,
+                              double periods_per_year = 252.0) -> ReturnMetrics;
+```
+
 ## Usage
 
 ```cpp
@@ -133,6 +178,12 @@ auto corr = to_correlation_matrix(cov);
 vector<double> signal = { /* ... */ };
 vector<double> fwd_returns = { /* ... */ };
 auto metrics = analyze_signal(signal, fwd_returns);
+
+// Return metrics
+vector<double> daily_returns = { /* ... */ };
+auto perf = calculate_return_metrics(daily_returns);
+std::cout << "Sharpe: " << perf.sharpe_ratio << "\n";
+std::cout << "Max DD: " << perf.max_drawdown * 100 << "%\n";
 ```
 
 ## Related

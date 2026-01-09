@@ -17,6 +17,7 @@ class FinkitConan(ConanFile):
         # fmt is pulled in by spdlog - don't specify separately to avoid conflicts
         self.requires("nlohmann_json/3.11.3")
         self.requires("tomlplusplus/3.4.0")
+        self.requires("eigen/3.4.0")  # Linear algebra (covariance, factor models, Monte Carlo)
 
     def generate(self):
         tc = CMakeToolchain(self, generator="Ninja")

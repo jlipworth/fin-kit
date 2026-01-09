@@ -5,6 +5,7 @@
 
 module;
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -272,20 +273,27 @@ auto rank_bonds(span<const Bond> bonds, const ql::Handle<ql::YieldTermStructure>
         results.push_back(rv);
     }
 
-    // Calculate z-scores relative to group
+    // Calculate z-scores relative to group using Eigen (numerically stable)
     if (!results.empty()) {
-        // Mean and std of z-spreads
-        double sum = 0.0, sum_sq = 0.0;
-        for (const auto& rv : results) {
-            sum += rv.z_spread;
-            sum_sq += rv.z_spread * rv.z_spread;
-        }
-        double mean = sum / static_cast<double>(results.size());
-        double variance = sum_sq / static_cast<double>(results.size()) - mean * mean;
-        double std_dev = std::sqrt(std::max(variance, 1e-10));
+        const auto n = static_cast<Eigen::Index>(results.size());
 
-        for (auto& rv : results) {
-            rv.rich_cheap_zscore = (rv.z_spread - mean) / std_dev;
+        // Build vector of z-spreads
+        Eigen::VectorXd z_spreads(n);
+        for (Eigen::Index i = 0; i < n; ++i) {
+            z_spreads(i) = results[static_cast<size_t>(i)].z_spread;
+        }
+
+        // Centered approach (numerically stable, avoids catastrophic cancellation)
+        double mean = z_spreads.mean();
+        Eigen::VectorXd centered = z_spreads.array() - mean;
+        double std_dev = std::sqrt(centered.squaredNorm() / static_cast<double>(n));
+
+        // Apply z-scores
+        if (std_dev > 1e-10) {
+            Eigen::VectorXd z_scores = centered / std_dev;
+            for (Eigen::Index i = 0; i < n; ++i) {
+                results[static_cast<size_t>(i)].rich_cheap_zscore = z_scores(i);
+            }
         }
     }
 

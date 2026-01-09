@@ -6,6 +6,7 @@
 
 module;
 
+#include <Eigen/Dense>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -273,19 +274,15 @@ public:
                                static_cast<double>(result_.total_trades);
         }
 
-        // Calculate Sharpe ratio
-        if (!daily_returns_.empty()) {
-            double mean_return = 0.0;
-            for (double r : daily_returns_)
-                mean_return += r;
-            mean_return /= static_cast<double>(daily_returns_.size());
+        // Calculate Sharpe ratio using Eigen for numerical stability
+        if (daily_returns_.size() >= 2) {
+            const auto n = static_cast<Eigen::Index>(daily_returns_.size());
+            Eigen::Map<const Eigen::VectorXd> returns(daily_returns_.data(), n);
 
-            double variance = 0.0;
-            for (double r : daily_returns_) {
-                variance += (r - mean_return) * (r - mean_return);
-            }
-            variance /= static_cast<double>(daily_returns_.size());
-            double std_dev = std::sqrt(variance);
+            double mean_return = returns.mean();
+            Eigen::VectorXd centered = returns.array() - mean_return;
+            // Sample std dev (n-1) for consistency with stats::sharpe_ratio
+            double std_dev = std::sqrt(centered.squaredNorm() / static_cast<double>(n - 1));
 
             if (std_dev > 1e-10) {
                 result_.sharpe_ratio = mean_return / std_dev * std::sqrt(252.0);

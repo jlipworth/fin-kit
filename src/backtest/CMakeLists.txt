@@ -12,7 +12,7 @@ target_sources(
 
 target_link_libraries(
   finkit_backtest PUBLIC finkit::types finkit::trading finkit::risk
-                         QuantLib::QuantLib uuid)
+                         QuantLib::QuantLib Eigen3::Eigen uuid)
 
 target_compile_features(finkit_backtest PUBLIC cxx_std_20)
 

@@ -6,6 +6,7 @@
 
 module;
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -72,61 +73,56 @@ inline auto calculate_ranks(span<const double> data) -> vector<size_t> {
 
 } // namespace detail
 
-/// Calculate Information Coefficient (rank correlation)
+/// Calculate Information Coefficient (rank correlation) using Eigen
 auto calculate_ic(span<const double> signals, span<const double> returns) -> double {
     if (signals.size() != returns.size() || signals.size() < 2) {
         return 0.0;
     }
 
-    const size_t n = signals.size();
+    const auto n = static_cast<Eigen::Index>(signals.size());
 
     // Spearman rank correlation
     vector<size_t> signal_ranks = detail::calculate_ranks(signals);
     vector<size_t> return_ranks = detail::calculate_ranks(returns);
 
-    // Pearson correlation of ranks
-    double mean_s = 0.0, mean_r = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        mean_s += static_cast<double>(signal_ranks[i]);
-        mean_r += static_cast<double>(return_ranks[i]);
-    }
-    mean_s /= static_cast<double>(n);
-    mean_r /= static_cast<double>(n);
-
-    double cov = 0.0, var_s = 0.0, var_r = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        double ds = static_cast<double>(signal_ranks[i]) - mean_s;
-        double dr = static_cast<double>(return_ranks[i]) - mean_r;
-        cov += ds * dr;
-        var_s += ds * ds;
-        var_r += dr * dr;
+    // Convert ranks to Eigen vectors
+    Eigen::VectorXd rs(n), rr(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+        rs(i) = static_cast<double>(signal_ranks[static_cast<size_t>(i)]);
+        rr(i) = static_cast<double>(return_ranks[static_cast<size_t>(i)]);
     }
 
-    double denom = std::sqrt(var_s * var_r);
-    return denom > 1e-10 ? cov / denom : 0.0;
+    // Center the rank vectors
+    Eigen::VectorXd cs = rs.array() - rs.mean();
+    Eigen::VectorXd cr = rr.array() - rr.mean();
+
+    // Pearson correlation of ranks: dot(cs, cr) / (norm(cs) * norm(cr))
+    double denom = cs.norm() * cr.norm();
+    return denom > 1e-10 ? cs.dot(cr) / denom : 0.0;
 }
 
-/// Calculate autocorrelation at specified lag
+/// Calculate autocorrelation at specified lag using Eigen
 auto calculate_autocorrelation(span<const double> data, size_t lag) -> double {
     if (data.size() <= lag) {
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    const size_t n = data.size() - lag;
+    const auto n_total = static_cast<Eigen::Index>(data.size());
+    const auto n_pairs = static_cast<Eigen::Index>(data.size() - lag);
 
-    double mean = 0.0;
-    for (const double& x : data) {
-        mean += x;
-    }
-    mean /= static_cast<double>(data.size());
+    // Map data to Eigen vector
+    Eigen::Map<const Eigen::VectorXd> x(data.data(), n_total);
 
-    double cov = 0.0, var = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        cov += (data[i] - mean) * (data[i + lag] - mean);
-    }
-    for (size_t i = 0; i < data.size(); ++i) {
-        var += (data[i] - mean) * (data[i] - mean);
-    }
+    double mean = x.mean();
+
+    // Center the data
+    Eigen::VectorXd centered = x.array() - mean;
+
+    // Covariance: sum of (x_t - mean) * (x_{t+lag} - mean) for t = 0 to n-lag-1
+    double cov = centered.head(n_pairs).dot(centered.tail(n_pairs));
+
+    // Variance: sum of (x_t - mean)^2 for all t
+    double var = centered.squaredNorm();
 
     return var > 1e-10 ? cov / var : 0.0;
 }
@@ -273,7 +269,7 @@ auto calculate_pacf(span<const double> data, size_t max_lag) -> vector<double> {
     return pacf;
 }
 
-/// Test for stationarity using simple heuristics
+/// Test for stationarity using simple heuristics (Eigen-based)
 /// Returns p-value estimate (< 0.05 suggests stationarity)
 auto test_stationarity(span<const double> data) -> StationarityResult {
     // Simplified ADF test approximation
@@ -286,39 +282,37 @@ auto test_stationarity(span<const double> data) -> StationarityResult {
                                   .interpretation = "Insufficient data for stationarity test"};
     }
 
-    // Calculate first differences
-    vector<double> diff(data.size() - 1);
-    for (size_t i = 1; i < data.size(); ++i) {
-        diff[i - 1] = data[i] - data[i - 1];
-    }
+    const auto n = static_cast<Eigen::Index>(data.size() - 1);
+
+    // Map data and calculate first differences
+    Eigen::Map<const Eigen::VectorXd> y_full(data.data(), static_cast<Eigen::Index>(data.size()));
+
+    // y_{t-1} for t = 1 to n (lagged level)
+    Eigen::VectorXd y_lag = y_full.head(n);
+
+    // diff_t = y_t - y_{t-1}
+    Eigen::VectorXd diff = y_full.tail(n) - y_lag;
 
     // Simple regression: diff_t = alpha + beta * y_{t-1} + error
     // Under null (unit root), beta = 0
-    double mean_y = 0.0, mean_diff = 0.0;
-    for (size_t i = 0; i < diff.size(); ++i) {
-        mean_y += data[i];
-        mean_diff += diff[i];
-    }
-    mean_y /= static_cast<double>(diff.size());
-    mean_diff /= static_cast<double>(diff.size());
+    double mean_y = y_lag.mean();
+    double mean_diff = diff.mean();
 
-    double cov = 0.0, var_y = 0.0;
-    for (size_t i = 0; i < diff.size(); ++i) {
-        cov += (data[i] - mean_y) * (diff[i] - mean_diff);
-        var_y += (data[i] - mean_y) * (data[i] - mean_y);
-    }
+    // Center both vectors
+    Eigen::VectorXd y_centered = y_lag.array() - mean_y;
+    Eigen::VectorXd diff_centered = diff.array() - mean_diff;
+
+    // Beta = cov(y_lag, diff) / var(y_lag)
+    double cov = y_centered.dot(diff_centered);
+    double var_y = y_centered.squaredNorm();
 
     double beta = var_y > 1e-10 ? cov / var_y : 0.0;
 
-    // Estimate standard error (simplified)
-    double sse = 0.0;
+    // Estimate standard error
     double alpha = mean_diff - beta * mean_y;
-    for (size_t i = 0; i < diff.size(); ++i) {
-        double pred = alpha + beta * data[i];
-        double err = diff[i] - pred;
-        sse += err * err;
-    }
-    double mse = sse / static_cast<double>(diff.size() - 2);
+    Eigen::VectorXd residuals = diff - (alpha + beta * y_lag.array()).matrix();
+    double sse = residuals.squaredNorm();
+    double mse = sse / static_cast<double>(n - 2);
     double se_beta = std::sqrt(mse / var_y);
 
     double adf_stat = se_beta > 1e-10 ? beta / se_beta : 0.0;

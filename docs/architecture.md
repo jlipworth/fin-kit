@@ -28,6 +28,18 @@ fin-kit is a modular C++20 financial analysis toolkit designed for quantitative 
 - Never hardcoded locale or market assumptions
 - ConventionRegistry provides convenience lookups only
 
+### Outsource Math to Libraries
+The engines and frameworks are already complicated. Outsource all strong math (where mistakes could happen) to battle-tested libraries:
+
+| Domain | Library | Examples |
+|--------|---------|----------|
+| Linear algebra | **Eigen** | Covariance matrices, factor models, Cholesky decomposition |
+| Interest rates | **QuantLib** | Curve bootstrapping, bond pricing, day counting |
+| Statistics | **Eigen + std** | Mean, variance via Eigen; sorting/searching via `<algorithm>` |
+| Data storage | **DuckDB** | SQL queries, aggregations, time series |
+
+**Why:** A bug in a hand-rolled covariance calculation is hard to find. A bug in framework orchestration is easier to debug. Let libraries handle the math correctness; focus custom code on domain-specific orchestration.
+
 ## Module Dependency Graph
 
 ```

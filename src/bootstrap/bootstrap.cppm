@@ -367,13 +367,13 @@ auto calculate_fed_probability(double ff_futures_price, const ql::Date& meeting_
     double move_in_25bp_units = result.expected_move_bps / 25.0;
 
     if (move_in_25bp_units >= 0) {
-        // Probability of hike = move / 25bp (capped at 1)
-        result.prob_hike_25bp = std::min(1.0, std::max(0.0, move_in_25bp_units));
+        // Probability of hike = move / 25bp (capped at [0, 1])
+        result.prob_hike_25bp = std::clamp(move_in_25bp_units, 0.0, 1.0);
         result.prob_cut_25bp = 0.0;
         result.prob_no_change = 1.0 - result.prob_hike_25bp;
     } else {
-        // Probability of cut = abs(move) / 25bp (capped at 1)
-        result.prob_cut_25bp = std::min(1.0, std::max(0.0, -move_in_25bp_units));
+        // Probability of cut = abs(move) / 25bp (capped at [0, 1])
+        result.prob_cut_25bp = std::clamp(-move_in_25bp_units, 0.0, 1.0);
         result.prob_hike_25bp = 0.0;
         result.prob_no_change = 1.0 - result.prob_cut_25bp;
     }

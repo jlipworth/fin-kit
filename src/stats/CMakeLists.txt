@@ -8,9 +8,10 @@ target_sources(
          stats.cppm
          stats-rolling.cppm
          stats-covariance.cppm
-         stats-signals.cppm)
+         stats-signals.cppm
+         stats-returns.cppm)
 
-target_link_libraries(finkit_stats PUBLIC spdlog::spdlog)
+target_link_libraries(finkit_stats PUBLIC spdlog::spdlog Eigen3::Eigen)
 
 target_compile_definitions(finkit_stats PUBLIC SPDLOG_FMT_EXTERNAL)
 
