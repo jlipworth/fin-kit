@@ -37,8 +37,7 @@ Last updated: 2026-01-08
 
 ### Documentation
 - `docs/architecture.md` - Complete module structure and design principles
-- `docs/roadmap.md` - Implementation phases with checkboxes
-- `docs/FUTURE_WORK.md` - Comprehensive future improvements list
+- `docs/roadmap.md` - Development roadmap and planned features
 - `docs/concepts/backtest-lifecycle.md` - Educational guide
 - `docs/guides/writing-a-strategy.md` - Strategy implementation how-to
 - `docs/INPUT_REQUIREMENTS.md` - Data specs for all calculations
@@ -71,12 +70,9 @@ Last updated: 2026-01-08
 6. **Time zone handling** - UTC storage with display conversion?
 7. **Config file location** - Currently checks XDG and ~/.finkit/
 
-## Next Steps (Priority Order)
+## What's Next
 
-1. **Visualization module** - Implement terminal charts and reports
-2. **Additional tests** - Integration tests, edge cases
-3. **Concurrency** - Parallel calculations in backtest
-4. **Decimal precision** - Transaction amount accuracy
+See [roadmap.md](roadmap.md) for current priorities and planned phases.
 
 ## Quick Build
 
