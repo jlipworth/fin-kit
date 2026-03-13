@@ -34,11 +34,11 @@ cmake --build build/build/Release
 The application uses:
 
 - `finkit.analysis` - Bond basis calculation functions
-- `finkit.data` - DuckDB data access for market data
+- `finkit.data` - TimescaleDB data access for market data
 
 ## Data Requirements
 
-Before running, populate the InputDataStore with:
+Before running, ensure the following tables are populated in TimescaleDB:
 
 | Table | Required Fields |
 |-------|-----------------|

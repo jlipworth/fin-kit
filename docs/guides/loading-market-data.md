@@ -1,19 +1,19 @@
 # Loading Market Data
 
-This guide explains how to load market data into fin-kit's DuckDB stores.
+This guide explains how to query and work with market data from fin-kit's TimescaleDB store.
 
 ## Data Store Architecture
 
-fin-kit separates data into two stores:
+fin-kit uses a unified DataStore backed by TimescaleDB, shared with the Python repo:
 
-| Store | Purpose | Access |
-|-------|---------|--------|
-| **InputDataStore** | Market data, reference data, external feeds | Read-only |
-| **OutputDataStore** | Calculation results, trades, equity curves | Read-write |
+| Concern | Description |
+|---------|-------------|
+| **Market data** | Populated by the Python repo's data pipeline |
+| **Calculation results** | Written by fin-kit calculations and backtests |
 
-This separation ensures calculations never modify source data and results are traceable to specific runs.
+The Python repo handles data ingestion (Bloomberg, central banks, etc.) and writes to TimescaleDB. fin-kit reads this data for calculations and writes results back to the same database.
 
-## Creating Data Stores
+## Connecting to TimescaleDB
 
 ```cpp
 import finkit.data;
@@ -22,25 +22,40 @@ using namespace finkit::data;
 
 // Option 1: From config file (recommended for production)
 auto config = load_config();  // Loads from ~/.config/finkit/config.toml
-auto stores = create_data_stores(config);
+auto store = create_data_store(config);
 
-// Option 2: In-memory (for testing)
-auto stores = create_in_memory_stores();
-
-// Option 3: Explicit paths
-auto input = std::make_unique<InputDataStore>("/path/to/input.db");
-auto output = std::make_unique<OutputDataStore>("/path/to/output.db");
+// Option 2: From environment variables
+auto store = create_data_store_from_env();
 ```
 
-## Configuration File
+## Configuration
+
+### Environment Variables (recommended)
+
+```bash
+# Via Infisical (recommended)
+infisical run --env=dev --path="/kubernetes/infrastructure/timescaledb" -- \
+  ./build/build/Release/apps/bond_basis/bond_basis
+
+# Or set manually
+export TSDB_HOST=localhost
+export TSDB_PORT=5432
+export TSDB_DATABASE=finkit
+export TSDB_USER=finkit
+export TSDB_PASSWORD=secret
+```
+
+### TOML Config
 
 Create `~/.config/finkit/config.toml`:
 
 ```toml
 [database]
-input_path = "~/.finkit/input.db"
-output_path = "~/.finkit/output.db"
-wal_mode = true
+host = "localhost"
+port = 5432
+database = "finkit"
+user = "finkit"
+password = "secret"
 
 [logging]
 level = "info"
@@ -51,7 +66,7 @@ default_timezone = "America/New_York"
 
 ## Input Data Schema
 
-InputDataStore creates tables automatically on first connection. For the complete schema with field descriptions, see [INPUT_REQUIREMENTS.md](../INPUT_REQUIREMENTS.md).
+Market data tables are populated by the Python repo's data pipeline. For the complete schema with field descriptions, see [INPUT_REQUIREMENTS.md](../INPUT_REQUIREMENTS.md).
 
 Key tables:
 
@@ -64,112 +79,35 @@ Key tables:
 - `fx_spot` - FX spot rates
 - `fx_forwards` - FX forward points
 
-## Inserting Data
-
-### Direct SQL
-
-```cpp
-InputDataStore input("~/.finkit/input.db");
-
-// Insert OHLCV data
-input.query(R"(
-    INSERT INTO market_ohlcv (symbol, timestamp, open, high, low, close, volume)
-    VALUES
-        ('SPY', '2024-01-02 09:30:00-05', 470.0, 475.0, 469.0, 474.0, 50000000),
-        ('SPY', '2024-01-03 09:30:00-05', 474.0, 478.0, 473.0, 477.0, 45000000)
-)");
-
-// Insert bond reference data
-input.query(R"(
-    INSERT INTO bonds_reference (cusip, coupon, maturity, issue_date)
-    VALUES
-        ('912810TM0', 0.04375, '2053-08-15', '2023-08-15'),
-        ('912810TS7', 0.04125, '2053-11-15', '2023-11-15')
-)");
-
-// Insert repo rates
-input.query(R"(
-    INSERT INTO rates_repo (as_of, gc_rate, term_days, collateral_type)
-    VALUES
-        ('2024-01-02', 0.0530, 1, 'Treasury'),
-        ('2024-01-02', 0.0528, 30, 'Treasury')
-)");
-```
-
-### Prepared Statements
-
-```cpp
-// For bulk inserts, use prepared statements
-auto result = input.execute(
-    R"(INSERT INTO bonds_prices (cusip, as_of, clean_price, yield_to_maturity)
-       VALUES ($1, $2, $3, $4))",
-    std::string{"912810TM0"},
-    std::string{"2024-01-02 16:00:00-05"},
-    98.5,
-    0.0445
-);
-```
-
-### Loading from CSV
-
-DuckDB can read CSV files directly:
-
-```cpp
-input.query(R"(
-    INSERT INTO market_ohlcv
-    SELECT * FROM read_csv_auto('/path/to/prices.csv')
-)");
-```
-
-Or with explicit schema:
-
-```cpp
-input.query(R"(
-    INSERT INTO bonds_reference
-    SELECT
-        cusip,
-        coupon::DOUBLE,
-        maturity::DATE,
-        issue_date::DATE
-    FROM read_csv('/path/to/bonds.csv',
-        columns = {'cusip': 'VARCHAR', 'coupon': 'VARCHAR',
-                   'maturity': 'VARCHAR', 'issue_date': 'VARCHAR'})
-)");
-```
-
 ## Querying Data
 
 ```cpp
-auto result = input.query(R"(
+auto result = store.query(R"(
     SELECT cusip, clean_price, yield_to_maturity
     FROM bonds_prices
-    WHERE as_of >= '2024-01-01'
+    WHERE as_of >= $1
     ORDER BY cusip, as_of
-)");
+)", as_of);
 
-if (!result->HasError()) {
-    for (auto& row : *result) {
-        std::string cusip = row.GetValue<std::string>(0);
-        double price = row.GetValue<double>(1);
-        // Process row...
-    }
+for (const auto& row : result) {
+    auto cusip = row["cusip"].as<std::string>();
+    auto price = row["clean_price"].as<double>();
+    // Process row...
 }
 ```
 
-## Output Data Store
+## Writing Results
 
-The OutputDataStore holds calculation results, organized by `run_id`:
+The DataStore also writes calculation results, organized by `run_id`:
 
 ```cpp
-OutputDataStore output("~/.finkit/output.db");
-
 // Start a new calculation run
-auto run_id = start_run(output, "Bond Basis Analysis", "abc123def");
+auto run_id = start_run(store, "Bond Basis Analysis", "abc123def");
 
-// ... run calculations ...
+// ... run calculations, write results ...
 
 // Mark run complete
-complete_run(output, run_id);
+complete_run(store, run_id);
 ```
 
 Output tables include:
@@ -181,41 +119,43 @@ Output tables include:
 - `calculated_basis` - Bond basis results
 - `calculated_curves` - Bootstrapped curves
 
-## Example: Loading Data for Bond Basis
+## Example: Querying Data for Bond Basis
 
 ```cpp
 #include <string>
 
 import finkit.data;
 
-void load_bond_basis_data() {
-    auto stores = finkit::data::create_in_memory_stores();
-    auto& input = *stores.input;
+void query_bond_basis_data() {
+    auto store = finkit::data::create_data_store_from_env();
 
-    // Load bond reference
-    input.query(R"(
-        INSERT INTO bonds_reference (cusip, coupon, maturity, issue_date)
-        VALUES ('912810TM0', 0.04375, '2053-08-15', '2023-08-15')
+    // Query bond reference data
+    auto bonds = store.query(R"(
+        SELECT cusip, coupon, maturity, issue_date
+        FROM bonds_reference
+        WHERE maturity > $1
+    )", "2050-01-01");
+
+    // Query bond prices
+    auto prices = store.query(R"(
+        SELECT cusip, as_of, clean_price
+        FROM bonds_prices
+        WHERE as_of = $1
+    )", "2024-01-02");
+
+    // Query futures
+    auto futures = store.query(R"(
+        SELECT contract_code, product, price, first_delivery, last_delivery
+        FROM futures_treasury
+        WHERE product = 'US'
     )");
 
-    // Load bond prices
-    input.query(R"(
-        INSERT INTO bonds_prices (cusip, as_of, clean_price)
-        VALUES ('912810TM0', '2024-01-02 16:00:00', 98.5)
-    )");
-
-    // Load futures
-    input.query(R"(
-        INSERT INTO futures_treasury
-            (contract_code, product, price, first_delivery, last_delivery)
-        VALUES ('USH4', 'US', 118.25, '2024-03-01', '2024-03-28')
-    )");
-
-    // Load repo rates (essential for basis calculations)
-    input.query(R"(
-        INSERT INTO rates_repo (as_of, gc_rate, term_days)
-        VALUES ('2024-01-02', 0.0530, 1)
-    )");
+    // Query repo rates (essential for basis calculations)
+    auto repo = store.query(R"(
+        SELECT as_of, gc_rate, term_days
+        FROM rates_repo
+        WHERE as_of = $1
+    )", "2024-01-02");
 }
 ```
 

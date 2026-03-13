@@ -18,7 +18,7 @@ graph TD
 
     subgraph "External Dependencies"
         QL[QuantLib]
-        DDB[DuckDB]
+        PQ[libpqxx/TimescaleDB]
         SPD[spdlog]
         FMT[fmt]
         JSON[nlohmann_json]
@@ -32,7 +32,7 @@ graph TD
     AN --> D
     AN --> QL
     D --> C
-    D --> DDB
+    D --> PQ
 
     C --> SPD
     C --> FMT
@@ -51,8 +51,8 @@ graph LR
     end
 
     subgraph data["data"]
-        D1[DuckDB Wrapper]
-        D2[Parquet Reader]
+        D1[TimescaleDB Client]
+        D2[Schema Manager]
         D3[Data Schemas]
     end
 
@@ -79,8 +79,7 @@ graph LR
 ```mermaid
 flowchart LR
     subgraph Input
-        P[Parquet Files]
-        DB[(DuckDB)]
+        DB[(TimescaleDB)]
     end
 
     subgraph Processing
@@ -94,7 +93,6 @@ flowchart LR
         TERM[Terminal]
     end
 
-    P --> D
     DB --> D
     D --> A
     A --> JSON

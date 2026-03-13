@@ -10,7 +10,7 @@ This document tracks the development roadmap for fin-kit, including completed wo
 
 - [x] Project structure and C++20 modules build system
 - [x] Core module (paths, logging)
-- [x] Data module with InputDataStore/OutputDataStore
+- [x] Data module with DataStore (TimescaleDB via libpqxx)
 - [x] Types module with shared financial types
 - [x] Unit test infrastructure (GoogleTest)
 
@@ -196,7 +196,8 @@ This document tracks the development roadmap for fin-kit, including completed wo
 - [ ] Python bindings (pybind11)
 - [ ] Live trading adapter interface
 - [ ] WebSocket data feeds
-- [ ] Database backends (TimescaleDB, QuestDB)
+- [x] TimescaleDB backend (via libpqxx)
+- [ ] QuestDB backend
 - [ ] Cloud deployment support
 
 ### Performance
@@ -413,7 +414,7 @@ For backtesting, the most impactful parallelization targets:
 Before enabling parallelism, verify thread safety of:
 - [ ] QuantLib Settings (rebuild required)
 - [ ] spdlog (thread-safe by default)
-- [ ] DuckDB connections (use per-thread connections)
+- [ ] PostgreSQL connections (use per-thread connections or connection pool)
 - [ ] Random number generators (use per-thread RNG)
 - [ ] Caches (use thread-local or lock-free)
 

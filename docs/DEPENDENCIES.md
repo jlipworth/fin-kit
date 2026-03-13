@@ -17,7 +17,7 @@ Renovatebot is configured via `renovate.json` to automatically create PRs when d
 
 ### How it works
 
-1. **Conan packages** (duckdb, spdlog, fmt, nlohmann_json, tomlplusplus)
+1. **Conan packages** (libpqxx, spdlog, fmt, nlohmann_json, tomlplusplus)
    - Regex matches `self.requires("name/version")` in `conanfile.py`
    - Checks Conan Center for new versions
 
@@ -43,7 +43,7 @@ C++ dependencies are grouped into a single PR to reduce noise. Python dependenci
 
 Edit `conanfile.py`:
 ```python
-self.requires("duckdb/1.5.0")  # Change version here
+self.requires("libpqxx/7.10.0")  # Change version here
 ```
 
 Then rebuild:
@@ -89,6 +89,6 @@ If file formats change, update `renovate.json`. Test patterns at https://regex10
 
 | Pattern | Matches |
 |---------|---------|
-| `self\.requires\("(?<depName>[^/]+)/(?<currentValue>[^"]+)"\)` | `self.requires("duckdb/1.4.3")` |
+| `self\.requires\("(?<depName>[^/]+)/(?<currentValue>[^"]+)"\)` | `self.requires("libpqxx/7.9.2")` |
 | `QUANTLIB_VERSION="\$\{QUANTLIB_VERSION:-(?<currentValue>[^}]+)\}` | `QUANTLIB_VERSION:-1.40` |
 | `GIT_TAG\s+(?<currentValue>v[\d.]+)` | `GIT_TAG v1.14.0` |

@@ -4,12 +4,12 @@ This document explains how data flows through fin-kit, from external sources thr
 
 ## Overview
 
-fin-kit separates data into two distinct stores:
+fin-kit uses a unified DataStore backed by TimescaleDB, shared with the Python repo:
 
-1. **InputDataStore** - Read-only market and reference data
-2. **OutputDataStore** - Calculation results and run artifacts
+1. **Market data** - Populated by the Python repo's data pipeline
+2. **Calculation results** - Written by fin-kit calculations and frameworks
 
-This separation enforces a clear boundary: external data feeds write to input, fin-kit calculations write to output.
+This shared database eliminates the need for file-based data transfer and ensures both repos operate on the same data.
 
 ## Data Flow Diagram
 
@@ -20,8 +20,8 @@ External Sources                    fin-kit                         Consumers
   Market Data ───────┐
   (Bloomberg, etc.)  │
                      │         ┌─────────────────┐
-  Fed/Central Banks ─┼────────►│  InputDataStore │ (read-only)
-  (SOFR fixings)     │         │    (DuckDB)     │
+  Fed/Central Banks ─┼────────►│    DataStore    │
+  (SOFR fixings)     │         │  (TimescaleDB)  │ ◄── shared with Python repo
                      │         └────────┬────────┘
   Reference Data ────┘                  │
   (bonds, futures)                      │
@@ -47,17 +47,17 @@ External Sources                    fin-kit                         Consumers
                          ┌──────────────┴──────────────┐
                          ▼                             ▼
                ┌─────────────────┐           ┌─────────────────┐
-               │ OutputDataStore │           │       viz       │
-               │    (DuckDB)     │           │  (charts, etc.) │
+               │    DataStore    │           │       viz       │
+               │  (TimescaleDB)  │           │  (charts, etc.) │
                └────────┬────────┘           └─────────────────┘
                         │
                         ▼
                Analysis / Reports
 ```
 
-## InputDataStore
+## DataStore
 
-The InputDataStore provides read-only access to market data populated by external feeds. fin-kit never modifies this data.
+The DataStore provides unified access to TimescaleDB. Market data is populated by the Python repo; fin-kit reads it for calculations and writes results back.
 
 ### Input Tables
 
@@ -86,10 +86,6 @@ Input data should meet these standards:
 - **Completeness**: Bid/ask spreads for transaction cost analysis
 - **Freshness**: Staleness checks per data type (OIS < 5 min, bonds < 15 min)
 
-## OutputDataStore
-
-The OutputDataStore receives all fin-kit calculation results. Each backtest run creates a unique `run_id` that links related outputs.
-
 ### Output Tables
 
 | Table | Purpose | Key Fields |
@@ -105,51 +101,55 @@ The OutputDataStore receives all fin-kit calculation results. Each backtest run 
 | `calculated_basis` | Basis analysis | instrument_id, net_basis, is_ctd |
 | `analytics_summary` | Performance metrics | metric_name, metric_value |
 
-## DuckDB Usage
+## TimescaleDB Usage
 
-fin-kit uses [DuckDB](https://duckdb.org/) for both stores:
+fin-kit uses [TimescaleDB](https://www.timescale.com/) (PostgreSQL extension) via libpqxx:
 
-- **Embedded**: No separate server process
-- **OLAP-optimized**: Efficient for analytical queries
-- **Memory-mapped**: Large datasets without loading into RAM
-- **WAL mode**: Write-ahead logging for durability
+- **Shared database**: Same instance used by Python repo for data ingestion
+- **Time-series optimized**: Hypertables with automatic partitioning
+- **Standard SQL**: Full PostgreSQL compatibility via libpqxx
+- **Connection pooling**: Efficient connection management for concurrent access
 
 ### Configuration
 
-Default paths:
-```toml
-[database]
-input_path = "~/.finkit/input.db"
-output_path = "~/.finkit/output.db"
-wal_mode = true
+Environment variables (recommended):
+```bash
+export TSDB_HOST=localhost
+export TSDB_PORT=5432
+export TSDB_DATABASE=finkit
+export TSDB_USER=finkit
+export TSDB_PASSWORD=secret
 ```
 
-### In-Memory Mode
-
-For testing or ephemeral calculations:
-```cpp
-auto stores = finkit::data::create_in_memory_stores();
+Or TOML config:
+```toml
+[database]
+host = "localhost"
+port = 5432
+database = "finkit"
+user = "finkit"
+password = "secret"
 ```
 
 ## Module Interaction Pattern
 
 Calculation modules follow a consistent pattern:
 
-1. **Load** from InputDataStore (market data)
+1. **Load** from DataStore (market data)
 2. **Calculate** using pure functions (no side effects)
 3. **Return** typed results
-4. **Write** to OutputDataStore (via frameworks)
+4. **Write** to DataStore (via frameworks)
 
 ```cpp
 // Example: bootstrap a curve
-auto fixings = load_sofr_fixings(input_store, as_of);
-auto futures = load_sofr_futures(input_store, as_of);
-auto swaps = load_ois_quotes(input_store, Currency::USD, as_of);
+auto fixings = load_sofr_fixings(store, as_of);
+auto futures = load_sofr_futures(store, as_of);
+auto swaps = load_ois_quotes(store, Currency::USD, as_of);
 
 auto result = bootstrap::bootstrap_sofr_curve(fixings, futures, swaps, settle_date);
 
 if (result.success) {
-    save_calculated_curve(output_store, run_id, result);
+    save_calculated_curve(store, run_id, result);
 }
 ```
 
@@ -158,20 +158,20 @@ if (result.success) {
 Each calculation session follows this pattern:
 
 ```
-start_run(output_store, "my_analysis")
-    │
-    ├── Load data from InputDataStore
-    ├── Run calculations
-    ├── Write results to OutputDataStore
-    │
-    └── complete_run(output_store, run_id)
+start_run(store, "my_analysis")
+    |
+    +-- Load data from DataStore
+    +-- Run calculations
+    +-- Write results to DataStore
+    |
+    +-- complete_run(store, run_id)
 ```
 
 Run states: `running` -> `completed` or `failed`
 
 ## Best Practices
 
-1. **Never write to InputDataStore** from fin-kit code
+1. **Use the Python repo for data ingestion** - fin-kit reads, Python writes market data
 2. **Always use run_id** to link related outputs
 3. **Check data freshness** before calculations
 4. **Use transactions** for multi-table writes

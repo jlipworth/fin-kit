@@ -103,13 +103,13 @@ ctest --test-dir build/build/Release --output-on-failure
 
 For a more complete example, see the [bond_basis application](../apps/bond_basis/README.md) which demonstrates:
 
-- Loading market data from DuckDB
+- Loading market data from TimescaleDB
 - Running financial calculations
 - Using the analysis module
 
 ## Next Steps
 
-1. **[Loading Market Data](guides/loading-market-data.md)** - How to populate DuckDB with your data
+1. **[Loading Market Data](guides/loading-market-data.md)** - How to query market data from TimescaleDB
 2. **[Writing a Strategy](guides/writing-a-strategy.md)** - Create custom trading strategies
 3. **[Running a Backtest](guides/running-a-backtest.md)** - Full backtest configuration guide
 4. **[Architecture](architecture.md)** - Understand the module structure
@@ -119,7 +119,7 @@ For a more complete example, see the [bond_basis application](../apps/bond_basis
 | Module | Purpose |
 |--------|---------|
 | `finkit.core` | Foundation: DateTime, TimeSeries, Result<T,E> |
-| `finkit.data` | DuckDB data stores, config loading |
+| `finkit.data` | TimescaleDB data store, config loading |
 | `finkit.types` | Shared types: Currency, Bond, FXSpot |
 | `finkit.backtest` | Simulation engine, portfolio, strategies |
 | `finkit.trading` | Order types, execution models |

@@ -6,9 +6,10 @@ Configuration loading and database management for market data and calculation re
 
 The `finkit.data` module provides:
 - TOML configuration loading with sensible defaults
-- DuckDB database connections with thread-safe query execution
-- Separate input (read-only market data) and output (calculation results) data stores
+- TimescaleDB connections via libpqxx with thread-safe query execution
+- Unified DataStore for reading market data and writing calculation results
 - Run management for tracking backtest/calculation executions
+- Shared schema with the Python repo for seamless data exchange
 
 ## Configuration
 
@@ -16,7 +17,7 @@ The `finkit.data` module provides:
 
 | Struct | Purpose |
 |--------|---------|
-| `DatabaseConfig` | Input/output database paths, WAL mode |
+| `DatabaseConfig` | TimescaleDB connection parameters (host, port, database, user, password) |
 | `LoggingConfig` | Log level setting |
 | `BacktestConfig` | Default timezone |
 | `Config` | Combined configuration |
@@ -34,11 +35,25 @@ Config files searched in order:
 2. `~/.finkit/config.toml`
 3. `./finkit.toml`
 
-## Data Stores
+### Environment Variables
 
-### InputDataStore
+Connection parameters can also be set via environment variables (checked before TOML):
 
-Read-only access to external market data. Schema includes:
+| Variable | Fallback | Purpose |
+|----------|----------|---------|
+| `TSDB_HOST` / `POSTGRES_HOST` | `localhost` | Database host |
+| `TSDB_PORT` / `POSTGRES_PORT` | `5432` | Database port |
+| `TSDB_DATABASE` / `POSTGRES_DB` | `finkit` | Database name |
+| `TSDB_USER` / `POSTGRES_USER` | `finkit` | Username |
+| `TSDB_PASSWORD` / `POSTGRES_PASSWORD` | (none) | Password |
+
+## Data Store
+
+### DataStore
+
+Unified read/write access to TimescaleDB. The schema is shared with the Python repo, so market data written by the Python pipeline is directly available.
+
+**Read tables** (populated by Python repo):
 - `market_ohlcv` - OHLCV price data
 - `rates_sofr_fixings`, `rates_sofr_futures`, `rates_ois_quotes` - Interest rates
 - `rates_repo` - Repo rates
@@ -47,9 +62,7 @@ Read-only access to external market data. Schema includes:
 - `fx_spot`, `fx_forwards` - FX data
 - `reference_fomc_meetings`, `reference_holidays` - Reference data
 
-### OutputDataStore
-
-Write access for calculation results:
+**Write tables** (populated by fin-kit calculations):
 - `runs` - Run metadata
 - `trades`, `orders`, `positions` - Trade records
 - `equity` - Portfolio equity curve
@@ -59,22 +72,22 @@ Write access for calculation results:
 ### Factory Functions
 
 ```cpp
-auto create_data_stores(const Config& config) -> DataStores;
-auto create_in_memory_stores() -> DataStores;
+auto create_data_store(const Config& config) -> DataStore;
+auto create_data_store_from_env() -> DataStore;
 ```
 
 ## Run Management
 
 ```cpp
-auto start_run(OutputDataStore& db, string_view name, ...) -> string;
-void complete_run(OutputDataStore& db, string_view run_id);
-void fail_run(OutputDataStore& db, string_view run_id, string_view error_msg);
+auto start_run(DataStore& db, string_view name, ...) -> string;
+void complete_run(DataStore& db, string_view run_id);
+void fail_run(DataStore& db, string_view run_id, string_view error_msg);
 ```
 
 ## Dependencies
 
 - `finkit.core` - Path expansion
-- `duckdb` - Embedded database
+- `libpqxx` - PostgreSQL/TimescaleDB client
 - `toml++` - Configuration parsing
 - `spdlog` - Logging
 
@@ -83,16 +96,20 @@ void fail_run(OutputDataStore& db, string_view run_id, string_view error_msg);
 ```cpp
 import finkit.data;
 
+// Option 1: From config file
 auto config = finkit::data::load_config();
-auto stores = finkit::data::create_data_stores(config);
+auto store = finkit::data::create_data_store(config);
 
-// Query input data
-auto result = stores.input->query("SELECT * FROM rates_sofr_fixings");
+// Option 2: From environment variables
+auto store = finkit::data::create_data_store_from_env();
+
+// Query market data (populated by Python repo)
+auto result = store.query("SELECT * FROM rates_sofr_fixings WHERE fixing_date >= $1", as_of);
 
 // Start a calculation run
-auto run_id = finkit::data::start_run(*stores.output, "backtest_v1");
+auto run_id = finkit::data::start_run(store, "backtest_v1");
 // ... perform calculations ...
-finkit::data::complete_run(*stores.output, run_id);
+finkit::data::complete_run(store, run_id);
 ```
 
 ## Related

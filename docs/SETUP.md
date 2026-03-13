@@ -86,7 +86,7 @@ uv run conan install . --build=missing -of=build \
   -s compiler=clang -s compiler.version=21 -s compiler.cppstd=20 -s compiler.libcxx=libc++
 ```
 
-This builds duckdb, spdlog, and fmt from source (no pre-built binaries exist for this toolchain).
+This builds libpqxx, spdlog, and fmt from source (no pre-built binaries exist for this toolchain).
 
 ### 4. Configure CMake
 
@@ -126,7 +126,7 @@ ctest --test-dir build/build/Release --output-on-failure
 | Boost | Homebrew/Linuxbrew | Headers required by QuantLib |
 | Ninja | Homebrew/Linuxbrew | Required for C++20 module scanning |
 | QuantLib 1.40 | Built from source | Must use LLVM libc++ |
-| DuckDB | Conan (built) | Data storage |
+| libpqxx | Conan (built) | PostgreSQL/TimescaleDB client |
 | spdlog | Conan (built) | Logging |
 | fmt | Conan (built) | Formatting (via spdlog) |
 | nlohmann_json | Conan (header-only) | JSON parsing |
@@ -161,10 +161,37 @@ Both should show LLVM's libc++, not the system one.
 
 To rebuild a specific package:
 ```bash
-uv run conan install . --build=duckdb -of=build ...
+uv run conan install . --build=libpqxx -of=build ...
 ```
 
 To clear the cache:
 ```bash
 rm -rf ~/.conan2/p/
+```
+
+### TimescaleDB connection
+
+fin-kit connects to TimescaleDB for data storage. Set credentials via environment variables:
+
+```bash
+# Via Infisical (recommended)
+infisical run --env=dev --path="/kubernetes/infrastructure/timescaledb" -- \
+  cmake --build build/build/Release
+
+# Or set manually
+export TSDB_HOST=localhost
+export TSDB_PORT=5432
+export TSDB_DATABASE=finkit
+export TSDB_USER=finkit
+export TSDB_PASSWORD=secret
+```
+
+Alternatively, configure in `~/.config/finkit/config.toml`:
+```toml
+[database]
+host = "localhost"
+port = 5432
+database = "finkit"
+user = "finkit"
+password = "secret"
 ```

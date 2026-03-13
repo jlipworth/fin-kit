@@ -6,7 +6,7 @@ Last updated: 2026-01-08
 
 ### Build System
 - C++20 modules working with LLVM Clang 21
-- Conan for most deps (DuckDB, spdlog, fmt, tomlplusplus, nlohmann_json)
+- Conan for most deps (libpqxx, spdlog, fmt, tomlplusplus, nlohmann_json)
 - QuantLib 1.40 built from source with LLVM libc++ (ABI compatibility)
 - Boost headers from Homebrew/Linuxbrew (required by QuantLib)
 - All 19 tests passing
@@ -16,7 +16,7 @@ Last updated: 2026-01-08
 | Module | Status | Partitions | Notes |
 |--------|--------|------------|-------|
 | `finkit.core` | Working | - | Path utils, logging |
-| `finkit.data` | Working | - | TOML config, DuckDB, InputDataStore/OutputDataStore |
+| `finkit.data` | Working | - | TOML config, TimescaleDB via libpqxx, DataStore |
 | `finkit.types` | **Complete** | - | Currency, Bond, FX, Position types |
 | `finkit.bootstrap` | **Complete** | - | SOFR curve, OIS, CB cut probabilities |
 | `finkit.basis` | **Complete** | bond, cip, index | Bond/CIP/Index futures basis |
@@ -58,7 +58,7 @@ Last updated: 2026-01-08
 ## Open Questions
 
 ### Data Pipeline
-1. **Data source integration** - How does market data flow into DuckDB?
+1. **Data source integration** - Market data flows from Python repo into shared TimescaleDB
 2. **Historical data backfill** - How far back? What instruments?
 
 ### Calculations

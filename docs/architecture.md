@@ -18,9 +18,9 @@ fin-kit is a modular C++20 financial analysis toolkit designed for quantitative 
 - Can be used standalone (CLI, notebooks)
 
 ### Frameworks Compose Modules
-- Load data from InputDataStore
+- Load data from DataStore
 - Call calculation module functions
-- Write results to OutputDataStore
+- Write results to DataStore
 - No circular dependencies
 
 ### Conventions as Parameters
@@ -36,7 +36,7 @@ The engines and frameworks are already complicated. Outsource all strong math (w
 | Linear algebra | **Eigen** | Covariance matrices, factor models, Cholesky decomposition |
 | Interest rates | **QuantLib** | Curve bootstrapping, bond pricing, day counting |
 | Statistics | **Eigen + std** | Mean, variance via Eigen; sorting/searching via `<algorithm>` |
-| Data storage | **DuckDB** | SQL queries, aggregations, time series |
+| Data storage | **libpqxx/TimescaleDB** | SQL queries, time series, shared data store |
 
 **Why:** A bug in a hand-rolled covariance calculation is hard to find. A bug in framework orchestration is easier to debug. Let libraries handle the math correctness; focus custom code on domain-specific orchestration.
 
@@ -83,8 +83,7 @@ The engines and frameworks are already complicated. Outsource all strong math (w
 
 ### Layer 2: Data Access
 - **finkit.data**: Database connection, config loading
-  - InputDataStore: Read-only access to market/reference data
-  - OutputDataStore: Write access to calculation results
+  - DataStore: Unified read/write access to TimescaleDB (shared with Python repo)
 
 ### Layer 3: Shared Types
 - **finkit.types**: Shared financial types
@@ -124,9 +123,8 @@ Foundation library providing:
 - **Result<T, E>**: Error handling without exceptions
 
 ### data
-Data handling with input/output separation:
-- **InputDataStore**: Read-only access to market data, rates, bonds, FX
-- **OutputDataStore**: Write access to runs, trades, equity curves, signals
+Data handling with unified access:
+- **DataStore**: Unified access to TimescaleDB for market data (reads) and calculation results (writes)
 - **Config**: TOML configuration loading
 
 ### types
@@ -191,7 +189,7 @@ Visualization (placeholder):
 ## Memory Management
 
 - Arena allocators for temporary calculations
-- Memory-mapped files for large datasets (DuckDB)
+- PostgreSQL/TimescaleDB for persistent data storage
 - RAII throughout, no raw new/delete
 
 ## Error Handling
