@@ -12,7 +12,7 @@ class FinkitConan(ConanFile):
     def requirements(self):
         # QuantLib from Homebrew (brew install quantlib) - Conan's 1.30 has
         # consteval issues with Clang 21's std::format
-        self.requires("duckdb/1.4.3")
+        self.requires("libpqxx/7.9.2")
         self.requires("spdlog/1.17.0")
         # fmt is pulled in by spdlog - don't specify separately to avoid conflicts
         self.requires("nlohmann_json/3.11.3")

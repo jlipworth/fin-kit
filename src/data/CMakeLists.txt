@@ -2,7 +2,7 @@ add_library(finkit_data)
 
 target_sources(finkit_data PUBLIC FILE_SET CXX_MODULES FILES data.cppm)
 
-target_link_libraries(finkit_data PUBLIC finkit::core duckdb::duckdb
+target_link_libraries(finkit_data PUBLIC finkit::core libpqxx::pqxx
                                          tomlplusplus::tomlplusplus)
 
 target_compile_features(finkit_data PUBLIC cxx_std_20)

@@ -47,7 +47,7 @@ find_package(QuantLib 1.40 REQUIRED)
 find_package(Boost REQUIRED)
 
 # Conan-installed packages
-find_package(duckdb REQUIRED)
+find_package(libpqxx REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
