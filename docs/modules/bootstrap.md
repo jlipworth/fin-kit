@@ -74,8 +74,9 @@ auto calculate_fed_probability(
 
 Returns `FedProbabilityResult` with:
 - `implied_rate_pre`, `implied_rate_post`
-- `prob_hike_25bp`, `prob_cut_25bp`, `prob_no_change`
 - `expected_move_bps`
+- `lower_move_bps`, `prob_lower` — lower 25bp bracket and its probability
+- `upper_move_bps`, `prob_upper` — upper 25bp bracket and its probability
 
 ### Cumulative Probabilities
 

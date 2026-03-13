@@ -84,9 +84,10 @@ CREATE TABLE IF NOT EXISTS calculated_fed_predictions (
     ff_futures_price DOUBLE,
     implied_rate_post DOUBLE,
     expected_move_bps DOUBLE,
-    prob_hike_25bp DOUBLE,
-    prob_cut_25bp DOUBLE,
-    prob_no_change DOUBLE,
+    lower_move_bps INT,
+    prob_lower DOUBLE,
+    upper_move_bps INT,
+    prob_upper DOUBLE,
     days_to_meeting INT,
     PRIMARY KEY (run_id, as_of_date, meeting_date)
 );
@@ -156,9 +157,10 @@ struct FedPrediction {
     double ff_futures_price;
     double implied_rate_post;
     double expected_move_bps;
-    double prob_hike_25bp;
-    double prob_cut_25bp;
-    double prob_no_change;
+    int lower_move_bps;
+    double prob_lower;
+    int upper_move_bps;
+    double prob_upper;
     int days_to_meeting;
 };
 
@@ -235,7 +237,9 @@ For each FOMC meeting:
    post_rate = (implied_avg * days_in_month - days_before * current_rate) / days_after
    ```
 4. Expected move = `(post_rate - current_rate) * 10000` bps
-5. Probability = `|expected_move| / 25` (capped at [0,1])
+5. Bracket the expected move between adjacent 25bp outcomes:
+   `lower = floor(expected_move / 25) * 25`, `upper = lower + 25`
+   `P(upper) = (expected_move - lower) / 25`, `P(lower) = 1 - P(upper)`
 
 For cumulative predictions: chain calculations, updating running rate after each meeting.
 
