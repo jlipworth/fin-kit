@@ -309,11 +309,12 @@ struct FedProbabilityResult {
     double current_target_rate; // Current Fed target rate
     double implied_rate_pre;    // Implied rate before meeting
     double implied_rate_post;   // Implied rate after meeting
-    double prob_hike_25bp;      // Probability of 25bp hike
-    double prob_cut_25bp;       // Probability of 25bp cut
-    double prob_no_change;      // Probability of no change
     double expected_move_bps;   // Expected move in bps
     int days_to_meeting;
+    int lower_move_bps; // Lower 25bp bracket (floor)
+    double prob_lower;  // Probability of lower bracket outcome
+    int upper_move_bps; // Upper 25bp bracket (lower + 25)
+    double prob_upper;  // Probability of upper bracket outcome
 };
 
 /// Calculate implied Fed rate from Fed Funds futures price
@@ -361,22 +362,15 @@ auto calculate_fed_probability(double ff_futures_price, const ql::Date& meeting_
     // Calculate expected move
     result.expected_move_bps = (result.implied_rate_post - current_target_rate) * 10000.0;
 
-    // Calculate probabilities assuming 25bp increments
-    // If expected move is positive -> leaning hike
-    // If expected move is negative -> leaning cut
-    double move_in_25bp_units = result.expected_move_bps / 25.0;
+    // Bracket the expected move between two adjacent 25bp outcomes
+    int lower = static_cast<int>(std::floor(result.expected_move_bps / 25.0)) * 25;
+    int upper = lower + 25;
+    double p_upper = (result.expected_move_bps - lower) / 25.0;
 
-    if (move_in_25bp_units >= 0) {
-        // Probability of hike = move / 25bp (capped at [0, 1])
-        result.prob_hike_25bp = std::clamp(move_in_25bp_units, 0.0, 1.0);
-        result.prob_cut_25bp = 0.0;
-        result.prob_no_change = 1.0 - result.prob_hike_25bp;
-    } else {
-        // Probability of cut = abs(move) / 25bp (capped at [0, 1])
-        result.prob_cut_25bp = std::clamp(-move_in_25bp_units, 0.0, 1.0);
-        result.prob_hike_25bp = 0.0;
-        result.prob_no_change = 1.0 - result.prob_cut_25bp;
-    }
+    result.lower_move_bps = lower;
+    result.upper_move_bps = upper;
+    result.prob_upper = p_upper;
+    result.prob_lower = 1.0 - p_upper;
 
     return result;
 }
