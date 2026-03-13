@@ -30,3 +30,6 @@ Thumbs.db
 
 # Scratch/validation scripts (untracked)
 scratch/
+
+# Git worktrees
+.worktrees/
