@@ -40,7 +40,7 @@ using std::vector;
 
 Module interface units are `.cppm` files:
 - `src/core/core.cppm` - Time series, datetime, numerics
-- `src/data/data.cppm` - Market data ingestion and storage (DuckDB)
+- `src/data/data.cppm` - Market data ingestion and storage (TimescaleDB via libpqxx)
 - `src/curves/curves.cppm` - Rate curve bootstrapping, CIP/CCY basis
 - `src/analysis/analysis.cppm` - Indicators, statistics, bond basis (QuantLib)
 
