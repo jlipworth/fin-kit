@@ -124,7 +124,7 @@ Implement `IDataFeed` for database-backed feeds:
 ```cpp
 class DatabaseDataFeed : public IDataFeed {
 public:
-    explicit DatabaseDataFeed(InputDataStore& db,
+    explicit DatabaseDataFeed(DataStore& db,
                               const std::string& symbol,
                               ql::Date start, ql::Date end)
         : db_(db), symbol_(symbol), start_(start), end_(end) {
@@ -152,7 +152,7 @@ private:
         // Convert result to bars_
     }
 
-    InputDataStore& db_;
+    DataStore& db_;
     std::string symbol_;
     ql::Date start_, end_;
     std::vector<BarEvent> bars_;
@@ -271,7 +271,7 @@ int main() {
 
     // Load config and create stores
     auto config = load_config();
-    auto stores = create_data_stores(config);
+    auto store = create_data_store(config);
 
     // Configure backtest
     BacktestConfig bt_config{
@@ -287,7 +287,7 @@ int main() {
 
     // Load data from database into feed
     auto feed = std::make_unique<InMemoryDataFeed>();
-    // ... populate from stores.input
+    // ... populate from store
     engine.set_data_feed(std::move(feed));
 
     // Add strategy

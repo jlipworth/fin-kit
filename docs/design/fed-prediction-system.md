@@ -34,7 +34,7 @@ src/fedfunds/
 
 ## Data Model Changes
 
-### New Input Tables (InputDataStore in `src/data/data.cppm`)
+### New Input Tables (DataStore in `src/data/data.cppm`)
 
 **1. Fed Funds Futures** (`rates_ff_futures`)
 ```sql
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS rates_ff_effr (
 );
 ```
 
-### New Output Tables (OutputDataStore)
+### New Output Tables (DataStore)
 
 **1. Predictions** (`calculated_fed_predictions`)
 ```sql
@@ -190,17 +190,17 @@ struct FedPredictionBacktestResult {
 
 ### Data Access
 ```cpp
-auto get_target_rate_as_of(InputDataStore& db, ql::Date date) -> optional<FFTargetRate>;
-auto get_ff_futures_as_of(InputDataStore& db, ql::Date date) -> vector<FFContract>;
-auto get_upcoming_meetings(InputDataStore& db, ql::Date date, int count) -> vector<FOMCMeeting>;
-auto get_data_snapshot(InputDataStore& db, ql::Date date, int meetings_ahead) -> optional<FedDataSnapshot>;
+auto get_target_rate_as_of(DataStore& db, ql::Date date) -> optional<FFTargetRate>;
+auto get_ff_futures_as_of(DataStore& db, ql::Date date) -> vector<FFContract>;
+auto get_upcoming_meetings(DataStore& db, ql::Date date, int count) -> vector<FOMCMeeting>;
+auto get_data_snapshot(DataStore& db, ql::Date date, int meetings_ahead) -> optional<FedDataSnapshot>;
 ```
 
 ### Prediction Engine
 ```cpp
 class FedPredictionEngine {
 public:
-    FedPredictionEngine(InputDataStore& input, OutputDataStore& output, FedPredictionConfig config);
+    FedPredictionEngine(DataStore& db, FedPredictionConfig config);
 
     auto run() -> FedPredictionBacktestResult;           // Full backtest
     auto process_date(ql::Date date) -> vector<FedPrediction>;  // Single date
@@ -212,7 +212,7 @@ public:
 ```cpp
 class DatabaseDataFeed : public backtest::IDataFeed {
 public:
-    DatabaseDataFeed(InputDataStore& db, ql::Date start, ql::Date end);
+    DatabaseDataFeed(DataStore& db, ql::Date start, ql::Date end);
 
     auto next() -> optional<BarEvent> override;
     auto has_more() const -> bool override;
@@ -248,7 +248,7 @@ For cumulative predictions: chain calculations, updating running rate after each
 ## Implementation Phases
 
 ### Phase 1: Data Model (~1 day)
-- Add tables to `InputDataStore::init_input_schema()` and `OutputDataStore::init_output_schema()`
+- Add tables to `DataStore::ensure_schema()`
 - Files: `src/data/data.cppm`
 
 ### Phase 2: Types and Data Access (~1 day)
