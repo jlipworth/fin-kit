@@ -33,3 +33,4 @@ scratch/
 
 # Git worktrees
 .worktrees/
+.superpowers/
