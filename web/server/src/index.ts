@@ -1,11 +1,15 @@
 import { initRedis, startConsumer } from "./redis";
 import { websocketHandler, fanOut, type WsData } from "./ws";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { appRouter } from "./trpc";
+import { initPersistence, persistMessage } from "./persist";
 
 const WEB_PORT = parseInt(process.env.WEB_PORT || "3000");
 const REDIS_HOST = process.env.REDIS_HOST || "localhost";
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379");
 
 initRedis(REDIS_HOST, REDIS_PORT);
+await initPersistence();
 
 const server = Bun.serve<WsData>({
   port: WEB_PORT,
@@ -27,9 +31,14 @@ const server = Bun.serve<WsData>({
       return Response.json({ status: "ok" });
     }
 
-    // REST API placeholder (Task 5 adds full tRPC API)
-    if (url.pathname.startsWith("/api/")) {
-      return Response.json({ error: "not implemented" }, { status: 501 });
+    // tRPC API
+    if (url.pathname.startsWith("/api/trpc")) {
+      return fetchRequestHandler({
+        endpoint: "/api/trpc",
+        req,
+        router: appRouter,
+        createContext: () => ({}),
+      });
     }
 
     return new Response("Not found", { status: 404 });
@@ -38,9 +47,10 @@ const server = Bun.serve<WsData>({
   websocket: websocketHandler,
 });
 
-// Start Redis consumer → fan out to WebSocket clients
+// Start Redis consumer → fan out to WebSocket clients and persist
 startConsumer((stream, data) => {
   fanOut(stream, data);
+  persistMessage(stream, data);
 });
 
 console.log(`[server] listening on http://localhost:${server.port}`);
