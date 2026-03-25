@@ -2,12 +2,11 @@ import { useEffect, useRef } from "react";
 import { createChart, type IChartApi, type ISeriesApi, type LineData, type Time } from "lightweight-charts";
 
 interface TreasuryChartProps {
-  stream: string;
   latest: { price: string; timestamp: number } | undefined;
   label: string;
 }
 
-export function TreasuryChart({ stream, latest, label }: TreasuryChartProps) {
+export function TreasuryChart({ latest, label }: TreasuryChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);

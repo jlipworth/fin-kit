@@ -19,7 +19,7 @@ interface UseStreamResult {
 export function useStream({ url, patterns }: UseStreamOptions): UseStreamResult {
   const wsUrl = url || `ws://${window.location.host}/ws`;
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [connected, setConnected] = useState(false);
   const [latest, setLatest] = useState<Map<string, StreamMessage>>(new Map());
 

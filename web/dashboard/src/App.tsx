@@ -38,7 +38,6 @@ export default function App() {
           return (
             <TreasuryChart
               key={code}
-              stream={stream}
               label={label}
               latest={msg ? { price: msg.data.price, timestamp: Number(msg.data.timestamp) } : undefined}
             />
