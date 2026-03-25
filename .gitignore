@@ -34,3 +34,9 @@ scratch/
 # Git worktrees
 .worktrees/
 .superpowers/
+
+# Dashboard
+node_modules/
+web/dashboard/dist/
+.env
+.venv
