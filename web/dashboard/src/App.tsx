@@ -39,7 +39,7 @@ export default function App() {
             <TreasuryChart
               key={code}
               label={label}
-              latest={msg ? { price: msg.data.price, timestamp: Number(msg.data.timestamp) } : undefined}
+              latest={msg ? { price: msg.data.price, timestamp: msg.timestamp } : undefined}
             />
           );
         })}
