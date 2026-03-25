@@ -1,8 +1,8 @@
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <iostream>
-#include <signal.h>
 #include <string>
 #include <sw/redis++/redis++.h>
 #include <thread>
@@ -35,6 +35,10 @@ Config load_config() {
         c.redis_port = std::atoi(v);
     if (auto* v = std::getenv("FINKIT_STREAM_CALC_WINDOW_MS"))
         c.calc_window_ms = std::atoi(v);
+    if (c.redis_port <= 0 || c.redis_port > 65535)
+        c.redis_port = 6379;
+    if (c.calc_window_ms <= 0)
+        c.calc_window_ms = 100;
     return c;
 }
 
@@ -84,10 +88,20 @@ int main() {
     signal(SIGTERM, handle_signal);
 
     auto config = load_config();
-    auto uri = "tcp://" + config.redis_host + ":" + std::to_string(config.redis_port);
 
-    std::cout << "[finkit-stream] connecting to Redis at " << uri << "\n";
-    redis::Redis r(uri);
+    redis::ConnectionOptions conn_opts;
+    conn_opts.host = config.redis_host;
+    conn_opts.port = config.redis_port;
+    conn_opts.connect_timeout = std::chrono::seconds(5);
+    conn_opts.socket_timeout = std::chrono::seconds(5);
+    conn_opts.keep_alive = true;
+
+    redis::ConnectionPoolOptions pool_opts;
+    pool_opts.size = 1;
+
+    std::cout << "[finkit-stream] connecting to Redis at " << config.redis_host << ":"
+              << config.redis_port << "\n";
+    redis::Redis r(conn_opts, pool_opts);
 
     // Streams to consume — treasury futures from mock publisher or LSEG adapter
     std::vector<std::string> input_streams = {
@@ -107,14 +121,15 @@ int main() {
     auto last_calc = Clock::now();
     auto last_heartbeat = Clock::now();
     std::unordered_map<std::string, FuturesQuote> buffer;
+    std::unordered_map<std::string, std::vector<std::string>> pending_acks;
+
+    // Build XREADGROUP input once — streams are static
+    std::vector<std::pair<std::string, std::string>> stream_ids;
+    for (const auto& s : input_streams) {
+        stream_ids.emplace_back(s, ">");
+    }
 
     while (running) {
-        // Build XREADGROUP input: vector of {stream, ">"}
-        std::vector<std::pair<std::string, std::string>> stream_ids;
-        for (const auto& s : input_streams) {
-            stream_ids.emplace_back(s, ">");
-        }
-
         // Block for up to calc_window_ms
         using Item = std::pair<std::string, std::vector<std::pair<std::string, std::string>>>;
         using ItemStream = std::vector<Item>;
@@ -138,26 +153,46 @@ int main() {
 
             for (const auto& [id, fields] : items) {
                 FuturesQuote quote{};
+                bool valid = true;
                 for (const auto& [key, val] : fields) {
-                    if (key == "price")
-                        quote.price = std::stod(val);
-                    if (key == "timestamp")
-                        quote.timestamp = std::stoll(val);
+                    try {
+                        if (key == "price")
+                            quote.price = std::stod(val);
+                        if (key == "timestamp")
+                            quote.timestamp = std::stoll(val);
+                    } catch (const std::exception& e) {
+                        std::cerr << "[finkit-stream] malformed field " << key << "=" << val
+                                  << " in " << stream << ": " << e.what() << "\n";
+                        valid = false;
+                        break;
+                    }
                 }
-                buffer[code] = quote; // latest wins
+                if (valid)
+                    buffer[code] = quote;
 
-                // ACK the message
-                r.xack(stream, GROUP, id);
+                pending_acks[stream].push_back(id);
             }
         }
 
-        // Fire calculations when window expires
+        // Fire calculations when window expires, then ACK processed messages
         auto now = Clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_calc);
         if (elapsed.count() >= config.calc_window_ms && !buffer.empty()) {
-            run_calculations(r, buffer);
+            try {
+                run_calculations(r, buffer);
+            } catch (const std::exception& e) {
+                std::cerr << "[finkit-stream] calculation error: " << e.what() << "\n";
+            }
             buffer.clear();
             last_calc = now;
+
+            // ACK after calculations complete (at-least-once semantics)
+            for (const auto& [stream, ids] : pending_acks) {
+                for (const auto& id : ids) {
+                    r.xack(stream, GROUP, id);
+                }
+            }
+            pending_acks.clear();
         }
 
         // Heartbeat every 2 seconds
