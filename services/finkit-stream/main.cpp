@@ -1,9 +1,181 @@
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <signal.h>
+#include <string>
 #include <sw/redis++/redis++.h>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 import finkit.core;
 
+namespace redis = sw::redis;
+using Clock = std::chrono::steady_clock;
+
+static std::atomic<bool> running{true};
+void handle_signal(int) {
+    running = false;
+}
+
+// ── Configuration ──────────────────────────────────────────────────────────
+
+struct Config {
+    std::string redis_host = "localhost";
+    int redis_port = 6379;
+    int calc_window_ms = 100;
+};
+
+Config load_config() {
+    Config c;
+    if (auto* v = std::getenv("REDIS_HOST"))
+        c.redis_host = v;
+    if (auto* v = std::getenv("REDIS_PORT"))
+        c.redis_port = std::atoi(v);
+    if (auto* v = std::getenv("FINKIT_STREAM_CALC_WINDOW_MS"))
+        c.calc_window_ms = std::atoi(v);
+    return c;
+}
+
+// ── Stream helpers ─────────────────────────────────────────────────────────
+
+static const std::string GROUP = "finkit";
+static const std::string CONSUMER = "finkit-1";
+static constexpr long long MAXLEN = 10'000;
+
+void ensure_group(redis::Redis& r, const std::string& stream) {
+    try {
+        r.xgroup_create(stream, GROUP, "$", true); // mkstream=true
+    } catch (const redis::ReplyError&) {
+        // BUSYGROUP — already exists
+    }
+}
+
+// ── Buffered market data ───────────────────────────────────────────────────
+
+struct FuturesQuote {
+    double price;
+    long long timestamp;
+};
+
+// ── Calculations ───────────────────────────────────────────────────────────
+
+void run_calculations(redis::Redis& r,
+                      const std::unordered_map<std::string, FuturesQuote>& buffer) {
+    for (const auto& [code, quote] : buffer) {
+        // PoC calculation: implied rate = 100 - price
+        double implied_rate = 100.0 - quote.price;
+
+        std::string stream = "calc:implied_rate:" + code;
+        std::vector<std::pair<std::string, std::string>> fields = {
+            {"rate", std::to_string(implied_rate)},
+            {"price", std::to_string(quote.price)},
+            {"timestamp", std::to_string(quote.timestamp)},
+        };
+        r.xadd(stream, "*", fields.begin(), fields.end(), MAXLEN, true);
+    }
+}
+
+// ── Main loop ──────────────────────────────────────────────────────────────
+
 int main() {
-    std::cout << "finkit-stream: build OK\n";
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+
+    auto config = load_config();
+    auto uri = "tcp://" + config.redis_host + ":" + std::to_string(config.redis_port);
+
+    std::cout << "[finkit-stream] connecting to Redis at " << uri << "\n";
+    redis::Redis r(uri);
+
+    // Streams to consume — treasury futures from mock publisher or LSEG adapter
+    std::vector<std::string> input_streams = {
+        "market:futures:TU",
+        "market:futures:FV",
+        "market:futures:TY",
+        "market:futures:US",
+    };
+
+    for (const auto& s : input_streams) {
+        ensure_group(r, s);
+    }
+
+    std::cout << "[finkit-stream] listening on " << input_streams.size()
+              << " streams (window=" << config.calc_window_ms << "ms)\n";
+
+    auto last_calc = Clock::now();
+    auto last_heartbeat = Clock::now();
+    std::unordered_map<std::string, FuturesQuote> buffer;
+
+    while (running) {
+        // Build XREADGROUP input: vector of {stream, ">"}
+        std::vector<std::pair<std::string, std::string>> stream_ids;
+        for (const auto& s : input_streams) {
+            stream_ids.emplace_back(s, ">");
+        }
+
+        // Block for up to calc_window_ms
+        using Item = std::pair<std::string, std::vector<std::pair<std::string, std::string>>>;
+        using ItemStream = std::vector<Item>;
+        std::unordered_map<std::string, ItemStream> results;
+
+        try {
+            r.xreadgroup(GROUP, CONSUMER, stream_ids.begin(), stream_ids.end(),
+                         std::chrono::milliseconds(config.calc_window_ms),
+                         100, // count
+                         std::inserter(results, results.end()));
+        } catch (const redis::Error& e) {
+            std::cerr << "[finkit-stream] XREADGROUP error: " << e.what() << "\n";
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            continue;
+        }
+
+        // Parse incoming messages into buffer
+        for (const auto& [stream, items] : results) {
+            // Extract instrument code from stream name: "market:futures:TY" → "TY"
+            auto code = stream.substr(stream.rfind(':') + 1);
+
+            for (const auto& [id, fields] : items) {
+                FuturesQuote quote{};
+                for (const auto& [key, val] : fields) {
+                    if (key == "price")
+                        quote.price = std::stod(val);
+                    if (key == "timestamp")
+                        quote.timestamp = std::stoll(val);
+                }
+                buffer[code] = quote; // latest wins
+
+                // ACK the message
+                r.xack(stream, GROUP, id);
+            }
+        }
+
+        // Fire calculations when window expires
+        auto now = Clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_calc);
+        if (elapsed.count() >= config.calc_window_ms && !buffer.empty()) {
+            run_calculations(r, buffer);
+            buffer.clear();
+            last_calc = now;
+        }
+
+        // Heartbeat every 2 seconds
+        auto hb_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat);
+        if (hb_elapsed.count() >= 2) {
+            auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+            std::vector<std::pair<std::string, std::string>> hb_fields = {
+                {"status", "ok"},
+                {"timestamp", std::to_string(ts)},
+            };
+            r.xadd("heartbeat:finkit-stream", "*", hb_fields.begin(), hb_fields.end(), 1000LL,
+                   true);
+            last_heartbeat = now;
+        }
+    }
+
+    std::cout << "\n[finkit-stream] shutting down\n";
     return 0;
 }
