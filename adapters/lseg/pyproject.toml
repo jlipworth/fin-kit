@@ -1,0 +1,11 @@
+[project]
+name = "finkit-lseg-adapter"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "jl-lseg-toolkit",
+    "redis>=5.0",
+]
+
+[tool.uv.sources]
+jl-lseg-toolkit = { path = "jl-lseg-toolkit" }
