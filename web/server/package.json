@@ -1,0 +1,16 @@
+{
+  "name": "finkit-dashboard-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@trpc/server": "^11.0.0",
+    "ioredis": "^5.4.1",
+    "postgres": "^3.4.5",
+    "valibot": "^1.0.0"
+  }
+}
