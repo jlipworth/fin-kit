@@ -19,8 +19,11 @@ interface UseStreamResult {
 export function useStream({ url, patterns }: UseStreamOptions): UseStreamResult {
   const wsUrl = url || `ws://${window.location.host}/ws`;
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const [connected, setConnected] = useState(false);
   const [latest, setLatest] = useState<Map<string, StreamMessage>>(new Map());
+
+  const patternsKey = patterns.join(",");
 
   const connect = useCallback(() => {
     const ws = new WebSocket(wsUrl);
@@ -45,17 +48,20 @@ export function useStream({ url, patterns }: UseStreamOptions): UseStreamResult 
 
     ws.onclose = () => {
       setConnected(false);
-      setTimeout(connect, 2000);
+      reconnectRef.current = setTimeout(connect, 2000);
     };
 
     ws.onerror = () => ws.close();
 
     wsRef.current = ws;
-  }, [wsUrl, patterns]);
+  }, [wsUrl, patternsKey]);
 
   useEffect(() => {
     connect();
-    return () => wsRef.current?.close();
+    return () => {
+      clearTimeout(reconnectRef.current);
+      wsRef.current?.close();
+    };
   }, [connect]);
 
   return { latest, connected };

@@ -1,10 +1,16 @@
+import { useState, useEffect } from "react";
+
 interface StatusBarProps {
   connected: boolean;
   heartbeats: Record<string, number>;
 }
 
 export function StatusBar({ connected, heartbeats }: StatusBarProps) {
-  const now = Date.now();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 2000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div className="status-bar">

@@ -40,7 +40,7 @@ export default function App() {
               key={code}
               stream={stream}
               label={label}
-              latest={msg ? (msg.data as any) : undefined}
+              latest={msg ? { price: msg.data.price, timestamp: Number(msg.data.timestamp) } : undefined}
             />
           );
         })}
