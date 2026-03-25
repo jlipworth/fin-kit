@@ -236,12 +236,7 @@ All configuration via environment variables, consistent with existing TimescaleD
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
-# TimescaleDB (existing, TSDB_* is primary convention)
-TSDB_HOST=localhost
-TSDB_PORT=5432
-TSDB_DATABASE=finkit
-TSDB_USER=           # from env
-TSDB_PASSWORD=       # from env
+# TimescaleDB — see docs/SETUP.md for existing TSDB_* vars
 
 # fin-kit stream service
 FINKIT_STREAM_CALC_WINDOW_MS=100
@@ -251,7 +246,7 @@ WEB_PORT=3000
 WEB_WS_PORT=3001
 ```
 
-A `.env` file at the repo root for local dev, loaded by each process.
+A `.env` file at the repo root for local dev, loaded by each process. TimescaleDB credentials follow the existing `TSDB_*` convention documented in `docs/SETUP.md`.
 
 ## Startup & Shutdown
 
