@@ -15,6 +15,7 @@ class FinkitConan(ConanFile):
         # QuantLib for fin-kit; it is ABI-incompatible with the LLVM libc++
         # toolchain used here.
         self.requires("libpqxx/7.9.2")
+        self.requires("redis-plus-plus/1.3.15")
         self.requires("spdlog/1.17.0")
         # fmt is pulled in by spdlog - don't specify separately to avoid conflicts
         self.requires("nlohmann_json/3.11.3")

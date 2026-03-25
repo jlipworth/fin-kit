@@ -48,6 +48,7 @@ find_package(Boost REQUIRED)
 
 # Conan-installed packages
 find_package(libpqxx REQUIRED)
+find_package(redis++ REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
@@ -85,6 +86,9 @@ add_subdirectory(src/viz)
 
 # Applications
 add_subdirectory(apps)
+
+# Services
+add_subdirectory(services)
 
 # Tests
 add_subdirectory(tests)
