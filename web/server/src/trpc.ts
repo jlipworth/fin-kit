@@ -24,6 +24,10 @@ export function normalizeHistoryData(data: unknown): Record<string, string> {
   return {};
 }
 
+export function streamPatternToSqlLike(pattern: string): string {
+  return pattern.replaceAll("*", "%");
+}
+
 export const appRouter = t.router({
   history: t.router({
     /**
@@ -38,7 +42,7 @@ export const appRouter = t.router({
             stream: v.string(),
             from: v.optional(v.number()),
             to: v.optional(v.number()),
-            limit: v.optional(v.pipe(v.number(), v.maxValue(10_000))),
+            limit: v.optional(v.pipe(v.number(), v.minValue(1), v.maxValue(10_000))),
           }),
         ),
       )
@@ -56,7 +60,7 @@ export const appRouter = t.router({
         const rows = await sql`
           SELECT stream, data, ts
           FROM stream_log
-          WHERE stream LIKE ${input.stream.replace("*", "%")}
+          WHERE stream LIKE ${streamPatternToSqlLike(input.stream)}
             ${input.from ? sql`AND ts >= to_timestamp(${input.from} / 1000.0)` : sql``}
             ${input.to ? sql`AND ts <= to_timestamp(${input.to} / 1000.0)` : sql``}
           ORDER BY ts DESC

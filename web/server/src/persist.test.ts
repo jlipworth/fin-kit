@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolveTable } from "./persist";
-import { normalizeHistoryData } from "./trpc";
+import { normalizeHistoryData, streamPatternToSqlLike } from "./trpc";
 
 describe("resolveTable", () => {
   test("maps implied-rate calc streams for catch-all persistence", () => {
@@ -18,5 +18,15 @@ describe("normalizeHistoryData", () => {
 
   test("passes through object data", () => {
     expect(normalizeHistoryData({ status: "ok" })).toEqual({ status: "ok" });
+  });
+});
+
+describe("streamPatternToSqlLike", () => {
+  test("converts all glob wildcards to SQL wildcards", () => {
+    expect(streamPatternToSqlLike("market:*:*")).toBe("market:%:%");
+  });
+
+  test("leaves exact stream names unchanged", () => {
+    expect(streamPatternToSqlLike("market:futures:TY")).toBe("market:futures:TY");
   });
 });
