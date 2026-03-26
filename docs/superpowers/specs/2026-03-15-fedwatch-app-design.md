@@ -1,5 +1,10 @@
 # FedWatch CLI App — Design Spec
 
+> **Design note:** This document assumes the repo is already set up. Use
+> [../../SETUP.md](../../SETUP.md) for the LLVM/QuantLib/Conan build flow and
+> [../../LOCAL_SERVICES.md](../../LOCAL_SERVICES.md) for TimescaleDB-backed
+> local workflows.
+
 ## Goal
 
 Build a CLI app (`apps/fedwatch/`) that connects to TimescaleDB, pulls the current FF futures strip and FOMC meeting schedule, calculates rate change probabilities using existing bootstrap math, and prints a CME FedWatch-style table. This is a validation tool — results should be manually compared against CME's FedWatch website.

@@ -1,6 +1,12 @@
 # Fed Probability Distribution Redesign — Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Historical plan note:** This document is an implementation artifact, not the
+> authoritative onboarding guide. Before using any build/test commands here,
+> complete [../../SETUP.md](../../SETUP.md). For Redis, Docker Desktop / WSL,
+> and TimescaleDB-backed local workflows, use
+> [../../LOCAL_SERVICES.md](../../LOCAL_SERVICES.md).
 
 **Goal:** Replace the clamped three-outcome probability model in `FedProbabilityResult` with a two-outcome bracket interpolation model that handles any move size.
 

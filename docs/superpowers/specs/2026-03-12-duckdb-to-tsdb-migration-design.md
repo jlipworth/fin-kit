@@ -1,5 +1,10 @@
 # DuckDB to TimescaleDB Migration
 
+> **Historical design note:** This spec explains the migration design, not the
+> current onboarding flow. For first-time repo setup use
+> [../../SETUP.md](../../SETUP.md). For TimescaleDB and other local-service
+> workflows use [../../LOCAL_SERVICES.md](../../LOCAL_SERVICES.md).
+
 ## Summary
 
 Replace DuckDB with libpqxx (PostgreSQL C++ client) in the `finkit.data` module so fin-kit reads/writes the same TimescaleDB instance used by the Python repo (Refinitiv Projects).

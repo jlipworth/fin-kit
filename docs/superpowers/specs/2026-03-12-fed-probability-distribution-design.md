@@ -1,5 +1,10 @@
 # Fed Probability Distribution Redesign
 
+> **Historical design note:** This spec describes the redesign itself, not repo
+> setup. For current build prerequisites use [../../SETUP.md](../../SETUP.md).
+> For TimescaleDB/Redis/Docker-backed workflows use
+> [../../LOCAL_SERVICES.md](../../LOCAL_SERVICES.md).
+
 ## Summary
 
 Replace the three-field probability model (`prob_hike_25bp`, `prob_cut_25bp`, `prob_no_change`) in `FedProbabilityResult` with a two-outcome bracketing model that correctly handles implied moves beyond +/-25bp. This is required for accurate backtesting and Brier score calculation.

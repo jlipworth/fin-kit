@@ -1,6 +1,12 @@
 # DuckDB to TimescaleDB Migration — Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Historical plan note:** This document captures the migration plan and may
+> contain point-in-time command examples. Use [../../SETUP.md](../../SETUP.md)
+> for the current build/toolchain flow and
+> [../../LOCAL_SERVICES.md](../../LOCAL_SERVICES.md) for TimescaleDB, Redis,
+> Docker Desktop, and WSL-backed local service setup.
 
 **Goal:** Replace DuckDB with libpqxx (PostgreSQL C++ client) so fin-kit reads/writes the same TimescaleDB instance used by the Python repo.
 
