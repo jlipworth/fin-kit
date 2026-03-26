@@ -2,6 +2,17 @@
 
 This document explains how dependencies are versioned and updated in fin-kit.
 
+> **Setup rule:** QuantLib is intentionally built from source via
+> `./scripts/build-quantlib.sh`. Do **not** use `brew install quantlib` (or a
+> system package) for fin-kit.
+
+## Source of Truth
+
+- **Environment setup / install order:** [SETUP.md](SETUP.md)
+- **Local runtime services:** [LOCAL_SERVICES.md](LOCAL_SERVICES.md)
+- **Dependency versions:** `conanfile.py`, `scripts/build-quantlib.sh`,
+  `CMakeLists.txt`, and `pyproject.toml`
+
 ## Version Sources
 
 | Dependency | File | Format | Datasource |
@@ -17,7 +28,7 @@ Renovatebot is configured via `renovate.json` to automatically create PRs when d
 
 ### How it works
 
-1. **Conan packages** (libpqxx, spdlog, fmt, nlohmann_json, tomlplusplus)
+1. **Conan packages** (libpqxx, spdlog, nlohmann_json, tomlplusplus, eigen)
    - Regex matches `self.requires("name/version")` in `conanfile.py`
    - Checks Conan Center for new versions
 
@@ -50,6 +61,9 @@ Then rebuild:
 ```bash
 uv run conan install . --build=missing -of=build ...
 ```
+
+Note: `fmt` is pulled in transitively by `spdlog`, so the direct source of
+truth is `conanfile.py`, not this prose.
 
 ### QuantLib
 

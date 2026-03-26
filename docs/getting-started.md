@@ -6,6 +6,12 @@ This guide walks you through running your first fin-kit calculation.
 
 Complete the environment setup in [SETUP.md](SETUP.md) before proceeding.
 
+> **Start here first:** fin-kit expects QuantLib to be built from source with
+> `./scripts/build-quantlib.sh`. Do **not** use Homebrew/system QuantLib for
+> this repo. Run Conan via `uv run conan ...`, not a separate ad hoc Python
+> environment. If you are working on Redis/dashboard/streaming flows, also read
+> [LOCAL_SERVICES.md](LOCAL_SERVICES.md) before proceeding.
+
 ## Quick Example: Buy-and-Hold Backtest
 
 Here's a minimal example that runs a backtest with a buy-and-hold strategy:

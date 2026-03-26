@@ -1,14 +1,21 @@
 # fin-kit Status
 
-Last updated: 2026-01-08
+Last updated: 2026-03-25
+
+> **Onboarding note:** this file is a project snapshot, not the authoritative
+> setup guide. For first-time setup, use [docs/SETUP.md](SETUP.md). For Redis,
+> Docker Desktop / WSL, and TimescaleDB-backed workflows, use
+> [docs/LOCAL_SERVICES.md](LOCAL_SERVICES.md).
 
 ## Current State
 
 ### Build System
 - C++20 modules working with LLVM Clang 21
-- Conan for most deps (libpqxx, spdlog, fmt, tomlplusplus, nlohmann_json)
+- Conan for most deps (libpqxx, spdlog, nlohmann_json, tomlplusplus, eigen)
 - QuantLib 1.40 built from source with LLVM libc++ (ABI compatibility)
 - Boost headers from Homebrew/Linuxbrew (required by QuantLib)
+- Repo workflow uses `uv run conan ...`
+- Redis/Docker Desktop is required for dashboard and streaming workflows
 - All 19 tests passing
 
 ### Modules Implemented
@@ -76,6 +83,8 @@ See [roadmap.md](roadmap.md) for current priorities and planned phases.
 
 ## Quick Build
 
+After completing `docs/SETUP.md`:
+
 ```bash
 # Build
 cmake --build build/build/Release
@@ -86,4 +95,5 @@ ctest --test-dir build/build/Release --output-on-failure
 
 ## Full Setup
 
-See `docs/SETUP.md` for complete environment setup instructions.
+See `docs/SETUP.md` for complete environment setup instructions and
+`docs/LOCAL_SERVICES.md` for Redis/Docker/TimescaleDB workflows.

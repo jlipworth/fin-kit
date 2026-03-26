@@ -7,6 +7,16 @@
 
 A modern C++20 financial analysis toolkit for quantitative research and backtesting.
 
+## Start Here
+
+Before you build fin-kit, read the setup guide and complete the QuantLib step:
+
+1. Follow [docs/SETUP.md](docs/SETUP.md)
+2. Build QuantLib from source with `./scripts/build-quantlib.sh`
+3. Use Docker Desktop + WSL integration if you are working on Redis/dashboard/streaming workflows
+
+**Do not use Homebrew/system QuantLib for fin-kit.** The repo expects a custom build in `~/.local/quantlib-llvm/`.
+
 ## Features
 
 - **Core**: Time series containers, date/time handling, numerical utilities
@@ -18,9 +28,15 @@ A modern C++20 financial analysis toolkit for quantitative research and backtest
 ## Requirements
 
 - **LLVM Clang 21+** with libc++ (required for C++20 modules)
-- CMake 3.25+
+- CMake 3.28+
 - Ninja
-- Conan 2.x
+- uv (used to install Python tools and invoke Conan)
+
+### Required setup steps
+
+- Build QuantLib from source: `./scripts/build-quantlib.sh`
+- Detect Conan profile once: `uv run conan profile detect`
+- Install dependencies with `uv run conan install ...`
 
 ## Building
 
@@ -31,6 +47,17 @@ Quick start (after setup):
 cmake --build build/build/Release
 ctest --test-dir build/build/Release --output-on-failure
 ```
+
+## Local Services
+
+Redis, Docker Desktop / WSL integration, and TimescaleDB guidance live in
+[docs/LOCAL_SERVICES.md](docs/LOCAL_SERVICES.md).
+
+In short:
+
+- Core C++ build and tests do **not** require Docker
+- Redis is required for dashboard/streaming workflows
+- TimescaleDB is required for data-backed workflows that read/write shared market data
 
 ## Project Structure
 
@@ -52,16 +79,17 @@ fin-kit/
 
 ```bash
 # Install pre-commit hooks
-pre-commit install
-
-# Build with debug symbols
-cmake --preset conan-debug
-cmake --build build --config Debug
+uv run pre-commit install
 ```
+
+For alternate build types or local service workflows, follow the same toolchain
+pattern documented in [docs/SETUP.md](docs/SETUP.md) and
+[docs/LOCAL_SERVICES.md](docs/LOCAL_SERVICES.md).
 
 ## Documentation
 
 - [docs/SETUP.md](docs/SETUP.md) - Environment setup (macOS/Linux)
+- [docs/LOCAL_SERVICES.md](docs/LOCAL_SERVICES.md) - Redis, Docker Desktop, WSL, TimescaleDB
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) - Dependency management and Renovatebot
 - [docs/architecture.md](docs/architecture.md) - Design details
 - [docs/roadmap.md](docs/roadmap.md) - Planned features

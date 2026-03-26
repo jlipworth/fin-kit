@@ -10,8 +10,10 @@ class FinkitConan(ConanFile):
     generators = "CMakeDeps"
 
     def requirements(self):
-        # QuantLib from Homebrew (brew install quantlib) - Conan's 1.30 has
-        # consteval issues with Clang 21's std::format
+        # QuantLib is built separately via scripts/build-quantlib.sh and found
+        # by CMake at ~/.local/quantlib-llvm. Do not use Homebrew/system
+        # QuantLib for fin-kit; it is ABI-incompatible with the LLVM libc++
+        # toolchain used here.
         self.requires("libpqxx/7.9.2")
         self.requires("spdlog/1.17.0")
         # fmt is pulled in by spdlog - don't specify separately to avoid conflicts
