@@ -1,5 +1,10 @@
 # Fed Funds Futures Prediction System - Implementation Plan
 
+> **Setup note:** this plan assumes the core build environment is already
+> configured. For first-time repo setup use [../SETUP.md](../SETUP.md). If you
+> are validating against shared TimescaleDB-backed data, also review
+> [../LOCAL_SERVICES.md](../LOCAL_SERVICES.md).
+
 ## Summary
 
 Build a Fed Funds futures-based prediction system to calculate probability and magnitude of FOMC rate changes, with full backtesting capability through historical time.

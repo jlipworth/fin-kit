@@ -2,6 +2,11 @@
 
 This document explains how data flows through fin-kit, from external sources through calculations to output storage.
 
+> **Environment note:** this concept doc assumes your build environment is
+> already set up. Use [SETUP.md](../SETUP.md) for the LLVM/QuantLib/Conan build
+> toolchain and [LOCAL_SERVICES.md](../LOCAL_SERVICES.md) for TimescaleDB,
+> Redis, Docker Desktop, and WSL-specific local service setup.
+
 ## Overview
 
 fin-kit uses a unified DataStore backed by TimescaleDB, shared with the Python repo:

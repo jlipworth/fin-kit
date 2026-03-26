@@ -2,6 +2,11 @@
 
 This guide explains how to query and work with market data from fin-kit's TimescaleDB store.
 
+> **Prerequisite:** this is a TimescaleDB-backed workflow, not a standalone
+> build-only example. Complete [SETUP.md](../SETUP.md) first, then use
+> [LOCAL_SERVICES.md](../LOCAL_SERVICES.md) for TimescaleDB credential and local
+> service setup.
+
 ## Data Store Architecture
 
 fin-kit uses a unified DataStore backed by TimescaleDB, shared with the Python repo:

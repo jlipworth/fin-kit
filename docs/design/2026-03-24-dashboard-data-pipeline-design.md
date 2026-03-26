@@ -3,6 +3,12 @@
 **Date:** 2026-03-24
 **Status:** Approved
 
+> **Local-dev prerequisite:** this design assumes the repo build environment is
+> already configured and that Redis can be started locally. Use
+> [../SETUP.md](../SETUP.md) for the core build/toolchain and
+> [../LOCAL_SERVICES.md](../LOCAL_SERVICES.md) for Redis, Docker Desktop, WSL,
+> and TimescaleDB-backed local workflows.
+
 ## Overview
 
 A live dashboard showing both raw market data (LSEG/BBG) and fin-kit calculated analytics as first-class citizens. fin-kit runs as a persistent service alongside the data feed. The system supports sub-second latency, local single-user deployment (with potential for shared use later), and historical data access via TimescaleDB.
@@ -236,7 +242,7 @@ All configuration via environment variables, consistent with existing TimescaleD
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
-# TimescaleDB — see docs/SETUP.md for existing TSDB_* vars
+# TimescaleDB — see docs/SETUP.md and docs/LOCAL_SERVICES.md for TSDB_* vars / local setup
 
 # fin-kit stream service
 FINKIT_STREAM_CALC_WINDOW_MS=100
@@ -246,14 +252,14 @@ WEB_PORT=3000
 WEB_WS_PORT=3001
 ```
 
-A `.env` file at the repo root for local dev, loaded by each process. TimescaleDB credentials follow the existing `TSDB_*` convention documented in `docs/SETUP.md`.
+A `.env` file at the repo root for local dev, loaded by each process. TimescaleDB credentials follow the existing `TSDB_*` convention documented in `docs/SETUP.md`; local Redis/Docker expectations are now centralized in `docs/LOCAL_SERVICES.md`.
 
 ## Startup & Shutdown
 
 Convenience scripts (`start.sh` / `stop.sh` or Makefile targets) to be designed once the architecture is built and the actual startup sequence is understood. For the PoC, manual startup is acceptable:
 
 ```bash
-docker-compose up -d          # Redis
+docker compose up -d          # Redis
 python adapters/lseg/ingest.py &
 ./build/services/finkit-stream &
 cd web/server && bun run src/index.ts &

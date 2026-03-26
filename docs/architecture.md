@@ -4,6 +4,11 @@
 
 fin-kit is a modular C++20 financial analysis toolkit designed for quantitative research and backtesting. The architecture emphasizes:
 
+> **Looking for setup instead?** This file describes the system design, not the
+> installation flow. For first-time setup use [SETUP.md](SETUP.md); for Redis,
+> TimescaleDB, Docker Desktop, and WSL-backed local workflows use
+> [LOCAL_SERVICES.md](LOCAL_SERVICES.md).
+
 - **Zero-cost abstractions**: Performance-critical paths use compile-time polymorphism
 - **Modularity**: Each component is independently buildable and testable
 - **Type safety**: Strong typing for financial concepts (prices, quantities, timestamps)
