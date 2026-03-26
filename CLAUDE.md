@@ -7,6 +7,12 @@ Guidance for Claude Code when working with this repository.
 - **Setup**: See [docs/SETUP.md](docs/SETUP.md) for environment setup
 - **Architecture**: See [docs/architecture.md](docs/architecture.md) for design details
 
+
+## Repo-local Skills
+
+- `skills/timescaledb-access/SKILL.md` — use for TimescaleDB / PostgreSQL / Infisical-backed tasks in this repo
+- `.claude/agents/timescaledb-access.md` — Claude agent wrapper for the same workflow
+
 ## Build Commands
 
 ```bash

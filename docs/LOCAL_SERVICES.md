@@ -77,6 +77,10 @@ If you are using Infisical, keep the same secret source as the rest of the
 project and export the credentials before running the build or services that
 need them.
 
+For agent workflows, use the repo-local TSDB guidance in
+`skills/timescaledb-access/SKILL.md` (and `.claude/agents/timescaledb-access.md`
+for Claude).
+
 ## Quick checks
 
 - `docker compose version`
