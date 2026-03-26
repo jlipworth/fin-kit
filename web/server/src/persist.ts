@@ -9,6 +9,7 @@ const STREAM_TABLE_MAP: Record<string, string> = {
   "market:rates:ois:": "rates_ois_quotes",
   "market:bonds:": "bonds_prices",
   "market:futures:": "futures_treasury",
+  "calc:implied_rate:": "calculated_implied_rates",
   "calc:fed_probs:": "calculated_fed_probs",
   "calc:basis:bond:": "calculated_basis",
   "calc:basis:cip:": "calculated_basis",

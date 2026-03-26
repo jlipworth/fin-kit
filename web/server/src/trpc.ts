@@ -4,6 +4,26 @@ import { getSql } from "./persist";
 
 const t = initTRPC.create();
 
+export function normalizeHistoryData(data: unknown): Record<string, string> {
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === "object") {
+        return parsed as Record<string, string>;
+      }
+    } catch {
+      // Fall through and wrap the raw string below.
+    }
+    return { value: data };
+  }
+
+  if (data && typeof data === "object") {
+    return data as Record<string, string>;
+  }
+
+  return {};
+}
+
 export const appRouter = t.router({
   history: t.router({
     /**
@@ -45,7 +65,7 @@ export const appRouter = t.router({
 
         return rows.map((r: any) => ({
           stream: r.stream as string,
-          data: r.data as Record<string, string>,
+          data: normalizeHistoryData(r.data),
           timestamp: new Date(r.ts).getTime(),
         }));
       }),
