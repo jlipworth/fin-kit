@@ -18,6 +18,36 @@
 
 ---
 
+
+## Status Update — 2026-03-25
+
+**Current branch status:** implemented on `feature/dashboard-data-pipeline` and validated locally in the `dashboard` worktree.
+
+**Completed since the original plan was written:**
+- Custom QuantLib + Conan/CMake build validated with the repo's intended LLVM/libc++ setup.
+- Redis local-dev flow validated via Docker Desktop / WSL.
+- Mock publisher → Redis → `finkit-stream` → Bun WebSocket relay → React dashboard live path validated end-to-end.
+- TimescaleDB/Infisical-backed Bun persistence path validated against the shared TSDB.
+- Post-plan fixes landed for dashboard history/persistence:
+  - `fix: persist implied-rate history in dashboard server`
+  - `fix: tighten dashboard history query validation`
+- Repo-local TSDB/Infisical skill added:
+  - `skills/timescaledb-access/SKILL.md`
+  - `.claude/agents/timescaledb-access.md`
+- Setup / local-service / onboarding docs were swept and clarified on this branch.
+
+**Not yet completed:**
+- Manual LSEG Workspace validation remains outstanding.
+- The dashboard UI is still primarily live-first; historical preload + stitch-to-live behavior is the next product step.
+- Persistence is still the PoC `stream_log` catch-all rather than typed per-table writes.
+
+**Resume here next session:**
+1. Add historical preload + live stitch for `market:futures:*` charts.
+2. Add an integration test covering Redis → Bun persistence → `history.byStream`.
+3. Perform the manual LSEG Workspace validation when credentials/workspace are available.
+
+---
+
 ## File Structure
 
 | File | Action | Responsibility |
@@ -66,7 +96,7 @@
 - Create: `.env.example`
 - Modify: `.gitignore`
 
-- [ ] **Step 1: Create `docker-compose.yml`**
+- [x] **Step 1: Create `docker-compose.yml`**
 
 ```yaml
 services:
@@ -84,7 +114,7 @@ volumes:
 
 AOF persistence enabled per spec for replay-on-restart semantics.
 
-- [ ] **Step 2: Create `.env.example`**
+- [x] **Step 2: Create `.env.example`**
 
 ```bash
 # Redis
@@ -101,7 +131,7 @@ WEB_PORT=3000
 # Injected via: infisical run --env=dev --path="/kubernetes/infrastructure/timescaledb" -- <command>
 ```
 
-- [ ] **Step 3: Add entries to `.gitignore`**
+- [x] **Step 3: Add entries to `.gitignore`**
 
 Append to `.gitignore`:
 
@@ -113,7 +143,7 @@ web/dashboard/dist/
 .venv
 ```
 
-- [ ] **Step 4: Start Redis and verify**
+- [x] **Step 4: Start Redis and verify**
 
 ```bash
 docker compose up -d
@@ -122,7 +152,7 @@ docker compose exec redis redis-cli ping
 
 Expected: `PONG`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docker-compose.yml .env.example .gitignore
@@ -138,7 +168,7 @@ git commit -m "chore: add docker-compose for Redis and .env.example"
 - Modify: `CMakeLists.txt`
 - Create: `services/CMakeLists.txt`
 
-- [ ] **Step 1: Add redis-plus-plus to `conanfile.py`**
+- [x] **Step 1: Add redis-plus-plus to `conanfile.py`**
 
 After the existing `self.requires("libpqxx/7.9.2")` line, add:
 
@@ -146,7 +176,7 @@ After the existing `self.requires("libpqxx/7.9.2")` line, add:
         self.requires("redis-plus-plus/1.3.15")
 ```
 
-- [ ] **Step 2: Run Conan install to verify the package resolves**
+- [x] **Step 2: Run Conan install to verify the package resolves**
 
 Use the same compiler settings as existing builds:
 
@@ -160,7 +190,7 @@ uv run conan install . --build=missing -of=build \
 
 Expected: redis-plus-plus and hiredis (transitive) resolve and build successfully.
 
-- [ ] **Step 3: Verify the CMake package and target names**
+- [x] **Step 3: Verify the CMake package and target names**
 
 ```bash
 grep -r "redis" build/ --include="*.cmake" | head -10
@@ -168,7 +198,7 @@ grep -r "redis" build/ --include="*.cmake" | head -10
 
 Expected: Shows the generated CMake config files for redis-plus-plus. Look for the exact `find_package` name (likely `redis++`) and target name (likely `redis++::redis++_static` or `redis++::redis++`). Use these exact names in the steps below.
 
-- [ ] **Step 4: Add `find_package` and `services/` subdirectory to root `CMakeLists.txt`**
+- [x] **Step 4: Add `find_package` and `services/` subdirectory to root `CMakeLists.txt`**
 
 After the existing `find_package(libpqxx REQUIRED)` line, add (using the package name from Step 3):
 
@@ -182,13 +212,13 @@ After the existing `add_subdirectory(apps)` line, add:
 add_subdirectory(services)
 ```
 
-- [ ] **Step 5: Create `services/CMakeLists.txt`**
+- [x] **Step 5: Create `services/CMakeLists.txt`**
 
 ```cmake
 add_subdirectory(finkit-stream)
 ```
 
-- [ ] **Step 6: Create minimal `services/finkit-stream/CMakeLists.txt` to verify linkage**
+- [x] **Step 6: Create minimal `services/finkit-stream/CMakeLists.txt` to verify linkage**
 
 ```cmake
 add_executable(finkit-stream main.cpp)
@@ -203,7 +233,7 @@ target_compile_features(finkit-stream PRIVATE cxx_std_20)
 
 Note: Use the target name verified in Step 3. The target may be `redis++::redis++` instead of `redis++::redis++_static`. hiredis is linked transitively.
 
-- [ ] **Step 7: Create minimal `services/finkit-stream/main.cpp` to test compilation**
+- [x] **Step 7: Create minimal `services/finkit-stream/main.cpp` to test compilation**
 
 `main.cpp` must be a **regular translation unit** (not a module interface unit) because it mixes `#include` (redis-plus-plus headers) with `import` (fin-kit modules). The design spec flags this as a known risk — CMake 3.28+ with Clang handles this pattern when the file is NOT a module:
 
@@ -219,7 +249,7 @@ int main() {
 }
 ```
 
-- [ ] **Step 8: Build to verify redis-plus-plus + C++20 modules coexist**
+- [x] **Step 8: Build to verify redis-plus-plus + C++20 modules coexist**
 
 ```bash
 cmake --preset release
@@ -229,7 +259,7 @@ cmake --build build/build/Release --target finkit-stream
 
 Expected: Prints `finkit-stream: build OK`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add conanfile.py CMakeLists.txt services/
@@ -248,7 +278,7 @@ Enables testing the entire pipeline without a live LSEG feed. Publishes realisti
 - Create: `adapters/mock/publish_mock_data.py`
 - Create: `adapters/mock/pyproject.toml`
 
-- [ ] **Step 1: Create `adapters/mock/pyproject.toml`**
+- [x] **Step 1: Create `adapters/mock/pyproject.toml`**
 
 ```toml
 [project]
@@ -260,7 +290,7 @@ dependencies = [
 ]
 ```
 
-- [ ] **Step 2: Create `adapters/mock/publish_mock_data.py`**
+- [x] **Step 2: Create `adapters/mock/publish_mock_data.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -344,7 +374,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 3: Install deps and run the publisher**
+- [x] **Step 3: Install deps and run the publisher**
 
 ```bash
 cd adapters/mock
@@ -354,7 +384,7 @@ uv run publish_mock_data.py --interval 0.5
 
 Expected: Prints price updates every 5 ticks. Leave running.
 
-- [ ] **Step 4: Verify streams exist in Redis**
+- [x] **Step 4: Verify streams exist in Redis**
 
 In a separate terminal:
 
@@ -365,7 +395,7 @@ docker compose exec redis redis-cli XRANGE market:futures:TY - + COUNT 3
 
 Expected: `XLEN` returns a positive number. `XRANGE` shows entries with `price` and `timestamp` fields.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add adapters/mock/
@@ -392,7 +422,7 @@ The Bun server is a thin relay: reads all Redis Streams, fans out to WebSocket c
 - Create: `web/server/src/index.ts`
 - Create: `web/server/src/streams.test.ts`
 
-- [ ] **Step 1: Write the glob pattern matching test**
+- [x] **Step 1: Write the glob pattern matching test**
 
 Create `web/server/src/streams.test.ts`:
 
@@ -430,7 +460,7 @@ describe("matchesPattern", () => {
 });
 ```
 
-- [ ] **Step 2: Create `web/server/package.json`**
+- [x] **Step 2: Create `web/server/package.json`**
 
 ```json
 {
@@ -451,7 +481,7 @@ describe("matchesPattern", () => {
 }
 ```
 
-- [ ] **Step 3: Create `web/server/tsconfig.json`**
+- [x] **Step 3: Create `web/server/tsconfig.json`**
 
 ```json
 {
@@ -467,14 +497,14 @@ describe("matchesPattern", () => {
 }
 ```
 
-- [ ] **Step 4: Install dependencies**
+- [x] **Step 4: Install dependencies**
 
 ```bash
 cd web/server
 bun install
 ```
 
-- [ ] **Step 5: Create `web/server/src/ws.ts`**
+- [x] **Step 5: Create `web/server/src/ws.ts`**
 
 ```typescript
 import type { ServerWebSocket } from "bun";
@@ -554,7 +584,7 @@ export const websocketHandler = {
 };
 ```
 
-- [ ] **Step 6: Run the pattern matching test**
+- [x] **Step 6: Run the pattern matching test**
 
 ```bash
 cd web/server
@@ -563,7 +593,7 @@ bun test
 
 Expected: 6 tests pass.
 
-- [ ] **Step 7: Create `web/server/src/redis.ts`**
+- [x] **Step 7: Create `web/server/src/redis.ts`**
 
 ```typescript
 import Redis from "ioredis";
@@ -664,7 +694,7 @@ export async function startConsumer(
 }
 ```
 
-- [ ] **Step 8: Create `web/server/src/index.ts`**
+- [x] **Step 8: Create `web/server/src/index.ts`**
 
 ```typescript
 import { initRedis, startConsumer } from "./redis";
@@ -716,7 +746,7 @@ console.log(`[server] listening on http://localhost:${server.port}`);
 console.log(`[server] WebSocket at ws://localhost:${server.port}/ws`);
 ```
 
-- [ ] **Step 9: Verify end-to-end with mock publisher**
+- [x] **Step 9: Verify end-to-end with mock publisher**
 
 Terminal 1 — mock publisher (if not already running):
 ```bash
@@ -740,7 +770,7 @@ If `websocat` is not installed, use a quick Node/Bun one-liner:
 bun -e "const ws = new WebSocket('ws://localhost:3000/ws'); ws.onopen = () => ws.send(JSON.stringify({subscribe:['market:futures:*','heartbeat:*']})); ws.onmessage = e => console.log(e.data);"
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add web/server/
@@ -756,7 +786,7 @@ git commit -m "feat: add Bun WebSocket server with Redis Streams consumer and fa
 - Create: `web/server/src/trpc.ts`
 - Modify: `web/server/src/index.ts`
 
-- [ ] **Step 1: Create `web/server/src/persist.ts`**
+- [x] **Step 1: Create `web/server/src/persist.ts`**
 
 ```typescript
 import postgres from "postgres";
@@ -843,7 +873,7 @@ export function getSql() {
 }
 ```
 
-- [ ] **Step 2: Create `web/server/src/trpc.ts`**
+- [x] **Step 2: Create `web/server/src/trpc.ts`**
 
 ```typescript
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -904,7 +934,7 @@ export const appRouter = t.router({
 export type AppRouter = typeof appRouter;
 ```
 
-- [ ] **Step 3: Wire tRPC and persistence into `index.ts`**
+- [x] **Step 3: Wire tRPC and persistence into `index.ts`**
 
 In `web/server/src/index.ts`, add imports and initialization.
 
@@ -945,7 +975,7 @@ startConsumer((stream, data) => {
 });
 ```
 
-- [ ] **Step 4: Verify the server still starts cleanly**
+- [x] **Step 4: Verify the server still starts cleanly**
 
 ```bash
 cd web/server && bun run dev
@@ -953,7 +983,7 @@ cd web/server && bun run dev
 
 Expected: Server starts. Logs `[persist] TSDB_HOST not set — persistence disabled` (acceptable for local dev without TimescaleDB). WebSocket fan-out still works as before.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/server/src/trpc.ts web/server/src/persist.ts web/server/src/index.ts
@@ -982,7 +1012,7 @@ Minimal working dashboard that renders live US Treasury futures prices and conne
 - Create: `web/dashboard/src/hooks/useStream.ts`
 - Create: `web/dashboard/src/components/TreasuryChart.tsx`
 
-- [ ] **Step 1: Create `web/dashboard/package.json`**
+- [x] **Step 1: Create `web/dashboard/package.json`**
 
 ```json
 {
@@ -1013,7 +1043,7 @@ Minimal working dashboard that renders live US Treasury futures prices and conne
 }
 ```
 
-- [ ] **Step 2: Create `web/dashboard/tsconfig.json`**
+- [x] **Step 2: Create `web/dashboard/tsconfig.json`**
 
 ```json
 {
@@ -1029,7 +1059,7 @@ Minimal working dashboard that renders live US Treasury futures prices and conne
 }
 ```
 
-- [ ] **Step 3: Create `web/dashboard/vite.config.ts`**
+- [x] **Step 3: Create `web/dashboard/vite.config.ts`**
 
 ```typescript
 import { defineConfig } from "vite";
@@ -1054,7 +1084,7 @@ export default defineConfig({
 
 The Vite dev server proxies `/ws` and `/api` to the Bun server, avoiding CORS issues.
 
-- [ ] **Step 4: Create `web/dashboard/index.html`**
+- [x] **Step 4: Create `web/dashboard/index.html`**
 
 ```html
 <!DOCTYPE html>
@@ -1071,7 +1101,7 @@ The Vite dev server proxies `/ws` and `/api` to the Bun server, avoiding CORS is
 </html>
 ```
 
-- [ ] **Step 5: Create `web/dashboard/src/lib/trpc.ts`**
+- [x] **Step 5: Create `web/dashboard/src/lib/trpc.ts`**
 
 This sets up the tRPC client and React Query integration. The `AppRouter` type is imported from the server to get end-to-end type safety.
 
@@ -1093,7 +1123,7 @@ export const trpcClient = trpc.createClient({
 
 The relative import `../../../server/src/trpc` works because both packages live under `web/`. Only the `AppRouter` type is imported — no runtime code crosses the boundary.
 
-- [ ] **Step 6: Create `web/dashboard/src/main.tsx`**
+- [x] **Step 6: Create `web/dashboard/src/main.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -1118,7 +1148,7 @@ function Root() {
 createRoot(document.getElementById("root")!).render(<Root />);
 ```
 
-- [ ] **Step 7: Create `web/dashboard/src/hooks/useStream.ts`**
+- [x] **Step 7: Create `web/dashboard/src/hooks/useStream.ts`**
 
 ```typescript
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -1194,7 +1224,7 @@ export function useStream({ url, patterns }: UseStreamOptions): UseStreamResult 
 }
 ```
 
-- [ ] **Step 8: Create `web/dashboard/src/components/TreasuryChart.tsx`**
+- [x] **Step 8: Create `web/dashboard/src/components/TreasuryChart.tsx`**
 
 ```tsx
 import { useEffect, useRef } from "react";
@@ -1277,7 +1307,7 @@ export function TreasuryChart({ stream, latest, label }: TreasuryChartProps) {
 }
 ```
 
-- [ ] **Step 9: Create `web/dashboard/src/App.tsx`**
+- [x] **Step 9: Create `web/dashboard/src/App.tsx`**
 
 ```tsx
 import { useMemo } from "react";
@@ -1332,7 +1362,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 10: Create `web/dashboard/src/components/StatusBar.tsx`**
+- [x] **Step 10: Create `web/dashboard/src/components/StatusBar.tsx`**
 
 ```tsx
 interface StatusBarProps {
@@ -1362,7 +1392,7 @@ export function StatusBar({ connected, heartbeats }: StatusBarProps) {
 }
 ```
 
-- [ ] **Step 11: Create `web/dashboard/src/App.css`**
+- [x] **Step 11: Create `web/dashboard/src/App.css`**
 
 ```css
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1445,7 +1475,7 @@ body {
 }
 ```
 
-- [ ] **Step 12: Install deps and run the dashboard**
+- [x] **Step 12: Install deps and run the dashboard**
 
 ```bash
 cd web/dashboard
@@ -1455,7 +1485,7 @@ bun run dev
 
 Expected: Vite dev server starts on http://localhost:5173. Open in browser.
 
-- [ ] **Step 13: Verify end-to-end with mock publisher + Bun server**
+- [x] **Step 13: Verify end-to-end with mock publisher + Bun server**
 
 Ensure these are running:
 1. Redis: `docker compose up -d`
@@ -1467,7 +1497,7 @@ Open http://localhost:5173 in browser.
 
 Expected: Four charts (TU, FV, TY, US) rendering live price updates. Status bar shows green "Connected" dot and green "mock-publisher" heartbeat.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add web/dashboard/
@@ -1488,7 +1518,7 @@ The fin-kit streaming service reads raw market data from Redis Streams, runs cal
 - Modify: `services/finkit-stream/CMakeLists.txt`
 - Rewrite: `services/finkit-stream/main.cpp`
 
-- [ ] **Step 1: Update `services/finkit-stream/CMakeLists.txt`**
+- [x] **Step 1: Update `services/finkit-stream/CMakeLists.txt`**
 
 Replace the full contents with:
 
@@ -1508,7 +1538,7 @@ target_compile_definitions(finkit-stream PRIVATE SPDLOG_FMT_EXTERNAL)
 
 Note: Use `redis++::redis++_static` (or `redis++::redis++` — check Conan output). `finkit::analysis` linked for future bond basis calculations. `SPDLOG_FMT_EXTERNAL` matches existing module convention.
 
-- [ ] **Step 2: Write `services/finkit-stream/main.cpp`**
+- [x] **Step 2: Write `services/finkit-stream/main.cpp`**
 
 ```cpp
 #include <sw/redis++/redis++.h>
@@ -1688,7 +1718,7 @@ int main() {
 }
 ```
 
-- [ ] **Step 3: Build the streaming service**
+- [x] **Step 3: Build the streaming service**
 
 ```bash
 cmake --build build/build/Release --target finkit-stream
@@ -1696,7 +1726,7 @@ cmake --build build/build/Release --target finkit-stream
 
 Expected: Compiles successfully. If module/header mixing issues arise, verify that `main.cpp` is NOT declared as a module interface unit (no `export module` line).
 
-- [ ] **Step 4: Run end-to-end test with mock publisher**
+- [x] **Step 4: Run end-to-end test with mock publisher**
 
 Terminal 1 — mock publisher:
 ```bash
@@ -1723,7 +1753,7 @@ docker compose exec redis redis-cli XRANGE heartbeat:finkit-stream - + COUNT 1
 
 Expected: Entry with `status=ok` and a recent timestamp.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/finkit-stream/
@@ -1743,7 +1773,7 @@ Adds jl-lseg-toolkit as a git submodule and provides a thin Python adapter that 
 **Files:**
 - Modify: `.gitmodules`
 
-- [ ] **Step 1: Add the submodule**
+- [x] **Step 1: Add the submodule**
 
 ```bash
 git submodule add -b develop https://github.com/jlipworth/jl-lseg-toolkit.git adapters/lseg/jl-lseg-toolkit
@@ -1751,7 +1781,7 @@ git submodule add -b develop https://github.com/jlipworth/jl-lseg-toolkit.git ad
 
 This clones the toolkit into `adapters/lseg/jl-lseg-toolkit/` and creates/updates `.gitmodules`.
 
-- [ ] **Step 2: Verify the submodule**
+- [x] **Step 2: Verify the submodule**
 
 ```bash
 ls adapters/lseg/jl-lseg-toolkit/pyproject.toml
@@ -1759,7 +1789,7 @@ ls adapters/lseg/jl-lseg-toolkit/pyproject.toml
 
 Expected: File exists. The toolkit is checked out at the `develop` branch HEAD.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .gitmodules adapters/lseg/jl-lseg-toolkit
@@ -1774,7 +1804,7 @@ git commit -m "chore: add jl-lseg-toolkit as git submodule"
 - Create: `adapters/lseg/ingest.py`
 - Create: `adapters/lseg/pyproject.toml`
 
-- [ ] **Step 1: Create `adapters/lseg/pyproject.toml`**
+- [x] **Step 1: Create `adapters/lseg/pyproject.toml`**
 
 ```toml
 [project]
@@ -1791,7 +1821,7 @@ jl-lseg-toolkit = { path = "jl-lseg-toolkit" }
 
 The adapter imports `lseg_toolkit` from the submodule via a `uv` path source — not from PyPI.
 
-- [ ] **Step 2: Create `adapters/lseg/ingest.py`**
+- [x] **Step 2: Create `adapters/lseg/ingest.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -1905,7 +1935,7 @@ if __name__ == "__main__":
 
 **Note on `LSEGDataClient.get_history()` API:** The exact parameters may differ from what's shown. Check `jl-lseg-toolkit/src/lseg_toolkit/timeseries/client.py` for the current signature. The `count=1` + `interval="daily"` pattern fetches the latest snapshot. If the toolkit's API doesn't support `count`, use `start_date=today` instead.
 
-- [ ] **Step 3: Sync deps and verify the import works**
+- [x] **Step 3: Sync deps and verify the import works**
 
 ```bash
 cd adapters/lseg
@@ -1931,7 +1961,7 @@ docker compose exec redis redis-cli XRANGE market:futures:TY - + COUNT 3
 
 If LSEG Workspace is not available, use the mock publisher from Chunk 2 instead.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add adapters/lseg/ingest.py adapters/lseg/pyproject.toml
