@@ -26,6 +26,7 @@ using std::vector;
 using finkit::trading::Fill;
 using finkit::trading::Order;
 using finkit::trading::Timestamp;
+using finkit::types::AssetClass;
 using finkit::types::Currency;
 
 // ============================================================================
@@ -112,6 +113,30 @@ struct GreeksLimits {
     double max_dv01{0}; // Rate sensitivity
 };
 
+/// Static per-instrument reference data used by liquidity/concentration checks
+/// and the stress framework. Keyed by symbol in RiskConfig::instrument_info.
+struct InstrumentRiskInfo {
+    AssetClass asset_class{AssetClass::Equity};
+    Currency currency{Currency::USD}; // Denomination currency
+    string sector;                    // For sector concentration; empty = unclassified
+    double adv{0.0};                  // Average daily volume, shares/contracts (0 = unknown)
+    double duration{0.0};             // Modified duration in years (for RateBp shocks)
+};
+
+/// ADV-based liquidity limits (0 = disabled)
+struct LiquidityLimits {
+    double max_adv_pct{0.0};       // Max |position| as fraction of ADV, e.g. 0.05
+    double max_order_adv_pct{0.0}; // Max single-order quantity as fraction of ADV
+};
+
+/// Gross-exposure concentration limits as fraction of NAV (1.0 = disabled)
+struct ConcentrationLimits {
+    map<string, double> max_sector_pct;     // sector -> max gross/NAV
+    double default_max_sector_pct{1.0};     // fallback for sectors not in the map
+    map<Currency, double> max_currency_pct; // denomination ccy -> max gross/NAV
+    double default_max_currency_pct{1.0};
+};
+
 /// Combined risk limits
 struct RiskLimits {
     map<string, PositionLimits> position_limits; // Per-symbol or default
@@ -120,6 +145,8 @@ struct RiskLimits {
     PnLLimits pnl;
     VaRLimits var;
     GreeksLimits greeks;
+    LiquidityLimits liquidity;
+    ConcentrationLimits concentration;
 };
 
 // ============================================================================
@@ -155,6 +182,8 @@ struct RiskConfig {
     bool check_post_trade{true};
     bool check_on_bar{true};
     int check_frequency_bars{1}; // Check every N bars
+
+    map<string, InstrumentRiskInfo> instrument_info; // Per-symbol reference data
 };
 
 // ============================================================================

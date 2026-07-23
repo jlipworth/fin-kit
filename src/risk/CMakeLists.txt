@@ -1,10 +1,12 @@
 add_library(finkit_risk)
 
-target_sources(finkit_risk PUBLIC FILE_SET CXX_MODULES FILES risk.cppm
-                                  risk-types.cppm risk-engine.cppm)
+target_sources(finkit_risk PUBLIC FILE_SET CXX_MODULES FILES
+               risk.cppm risk-types.cppm risk-engine.cppm risk-var.cppm
+               risk-stress.cppm)
 
 target_link_libraries(finkit_risk PUBLIC finkit::types finkit::trading
-                                         spdlog::spdlog)
+                                         finkit::stats spdlog::spdlog
+                                         Eigen3::Eigen)
 
 target_compile_definitions(finkit_risk PUBLIC SPDLOG_FMT_EXTERNAL)
 

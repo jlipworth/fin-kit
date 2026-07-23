@@ -43,8 +43,8 @@ This document tracks the development roadmap for fin-kit, including completed wo
 ### Phase 5: Testing & Validation
 
 - [ ] Mock data with expected results
-- [ ] End-to-end backtest integration tests
-- [ ] Risk engine test coverage
+- [x] End-to-end backtest integration tests
+- [x] Risk engine test coverage
 - [ ] Calculation module unit tests with known results
 - [ ] Performance benchmarks
 
@@ -98,11 +98,11 @@ This document tracks the development roadmap for fin-kit, including completed wo
 ### Phase 8: Risk Framework Enhancements
 
 - [ ] Factor risk model integration (Barra, Axioma style)
-- [ ] VaR suite (Historical, Parametric, Monte Carlo)
-- [ ] Stress testing framework with predefined scenarios
+- [x] VaR suite (Historical, Parametric, Monte Carlo)
+- [x] Stress testing framework with predefined scenarios
 - [ ] Correlation-based net exposure calculation
-- [ ] Liquidity risk (ADV-based position limits)
-- [ ] Sector/geography concentration limits
+- [x] Liquidity risk (ADV-based position limits)
+- [x] Sector/geography concentration limits
 - [ ] Intraday VaR updates
 - [ ] Risk attribution (factor contribution)
 
@@ -117,10 +117,10 @@ This document tracks the development roadmap for fin-kit, including completed wo
 
 ### Phase 10: Backtest Framework Enhancements
 
-- [ ] Look-ahead bias detection/prevention
-- [ ] Survivorship bias handling (delisted securities)
-- [ ] Dynamic universe management (filter by criteria as-of date)
-- [ ] Short selling realism (locate, borrow costs, availability)
+- [x] Look-ahead bias detection/prevention
+- [x] Survivorship bias handling (delisted securities)
+- [x] Dynamic universe management (filter by criteria as-of date)
+- [x] Short selling realism (locate, borrow costs, availability)
 - [ ] Margin/collateral modeling
 - [ ] Settlement cycle modeling (T+1, T+2)
 - [ ] Corporate actions (splits, dividends, spin-offs)
@@ -209,16 +209,16 @@ This document tracks the development roadmap for fin-kit, including completed wo
 
 These gaps were identified during architecture review and should be prioritized:
 
-| Gap | Impact | Module |
-|-----|--------|--------|
-| Look-ahead bias prevention | Critical | backtest |
-| Survivorship bias | Critical | backtest |
-| Liquidity risk | Critical | risk |
-| Factor risk models | High | risk |
-| Market impact model | High | trading |
-| Settlement cycles | Moderate | trading |
-| Corporate actions | Moderate | backtest |
-| Bad tick detection | Moderate | data |
+| Gap | Impact | Module | Status |
+|-----|--------|--------|--------|
+| Look-ahead bias prevention | Critical | backtest | Addressed (Phase 10) |
+| Survivorship bias | Critical | backtest | Addressed (Phase 10) |
+| Liquidity risk | Critical | risk | Addressed (Phase 8) |
+| Factor risk models | High | risk | Open |
+| Market impact model | High | trading | Open |
+| Settlement cycles | Moderate | trading | Open |
+| Corporate actions | Moderate | backtest | Open |
+| Bad tick detection | Moderate | data | Open |
 
 ---
 
@@ -428,4 +428,4 @@ When implementing decimal precision:
 
 ---
 
-*Last updated: 2026-01-08*
+*Last updated: 2026-07-23*

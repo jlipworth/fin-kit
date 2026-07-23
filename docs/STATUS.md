@@ -1,6 +1,6 @@
 # fin-kit Status
 
-Last updated: 2026-03-25
+Last updated: 2026-07-23
 
 > **Onboarding note:** this file is a project snapshot, not the authoritative
 > setup guide. For first-time setup, use [docs/SETUP.md](SETUP.md). For Redis,
@@ -16,7 +16,7 @@ Last updated: 2026-03-25
 - Boost headers from Homebrew/Linuxbrew (required by QuantLib)
 - Repo workflow uses `uv run conan ...`
 - Redis/Docker Desktop is required for dashboard and streaming workflows
-- All 19 tests passing
+- 136 tests passing (10 DataStoreTest cases skipped without a live TimescaleDB)
 
 ### Modules Implemented
 
@@ -31,9 +31,9 @@ Last updated: 2026-03-25
 | `finkit.valuation` | **Complete** | bond, swap | Bond/swap valuation with QuantLib |
 | `finkit.curves` | Working | - | Rate accessors, CIP utilities |
 | `finkit.analysis` | Working | - | Bond basket analysis, ranking |
-| `finkit.trading` | **Complete** | types, engine | Orders, fills, execution engine |
-| `finkit.risk` | **Complete** | types, engine | Limits, pre-trade checks, active monitoring |
-| `finkit.backtest` | **Complete** | types, strategy, engine | Full backtest engine with strategies |
+| `finkit.trading` | **Complete** | types, engine | Orders, fills, execution engine, bid/ask half-spread |
+| `finkit.risk` | **Complete** | types, engine, var, stress | Limits, pre-trade checks, active monitoring, VaR (historical/parametric/Monte Carlo) + expected shortfall, scenario stress testing, ADV liquidity limits, sector/currency concentration limits |
+| `finkit.backtest` | **Complete** | types, strategy, engine | Full backtest engine with strategies; look-ahead guard, listing/delisting universe with forced liquidation, borrow costs + hard-to-borrow |
 | `finkit.viz` | Placeholder | - | Terminal visualization |
 
 ### Architecture
@@ -50,8 +50,16 @@ Last updated: 2026-03-25
 - `docs/INPUT_REQUIREMENTS.md` - Data specs for all calculations
 
 ### Testing
-- 19 tests passing (core, data, curves, analysis, backtest, viz)
-- Backtest tests include: Portfolio, DataFeed, Engine, Strategy
+- 136 tests passing (core, data, curves, analysis, trading, risk, backtest, viz)
+- Backtest tests include: Portfolio, DataFeed, Engine, Strategy, full-engine
+  integration (known P&L, order rejection, no-strategy runs), and realism
+  behavior (look-ahead guard, listing/delisting forced liquidation, borrow
+  cost accrual, hard-to-borrow, bid/ask half-spread)
+- Trading tests cover orders, positions, the order book, execution engine
+  fill models, commission schedules, and half-spread pricing
+- Risk tests cover limits/pre-trade/post-trade/monitoring, VaR (historical,
+  parametric, Monte Carlo) and expected shortfall, stress scenarios, ADV
+  liquidity limits, and sector/currency concentration limits
 - Precise expected value tests for P&L and drawdown calculations
 
 ## Key Design Decisions

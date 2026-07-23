@@ -8,6 +8,8 @@
 /// Module partitions:
 /// - finkit.risk:types  - Limit structures, breach policies, events
 /// - finkit.risk:engine - IRiskEngine and StandardRiskEngine
+/// - finkit.risk:var    - Historical/Parametric/Monte Carlo VaR + Expected Shortfall
+/// - finkit.risk:stress - Scenario stress testing framework
 ///
 /// @see docs/frameworks/risk.md for documentation
 
@@ -25,3 +27,5 @@ export module finkit.risk;
 
 export import :types;
 export import :engine;
+export import :var;
+export import :stress;

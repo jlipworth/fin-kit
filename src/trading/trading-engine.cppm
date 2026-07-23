@@ -168,6 +168,9 @@ struct BacktestExecutionConfig {
     double commission_pct{0.0};
     double min_commission{0.0};
     bool allow_partial_fills{false};
+    double half_spread_bps{0.0}; // Bid/ask half-spread in bps of fill price; buys pay
+                                 // mid + half-spread, sells receive mid - half-spread.
+                                 // 0 = disabled (legacy behavior).
 };
 
 // ============================================================================
@@ -276,6 +279,34 @@ public:
             Order& order = it->second;
 
             auto fill_opt = fill_model_->simulate_fill(order, bar, config_.default_slippage_bps);
+
+            // Apply bid/ask half-spread as an additional adverse price adjustment
+            // (buys pay mid + half-spread, sells receive mid - half-spread).
+            if (fill_opt && config_.half_spread_bps > 0.0) {
+                Fill& fill = *fill_opt;
+                double raw_price = fill.price; // model price, pre-spread
+                double spread_adj = fill.price * config_.half_spread_bps / 10000.0;
+                fill.price += (order.side == OrderSide::Buy) ? spread_adj : -spread_adj;
+
+                // A spread-adjusted price may no longer satisfy the order's limit.
+                if (order.type == OrderType::Limit && order.limit_price) {
+                    if ((order.side == OrderSide::Buy && fill.price > *order.limit_price) ||
+                        (order.side == OrderSide::Sell && fill.price < *order.limit_price)) {
+                        if (raw_price == *order.limit_price) {
+                            // The fill model clamped a marketable limit order to its
+                            // limit (market traded through it intra-bar): a resting
+                            // limit would fill at the limit, so cap rather than
+                            // discard — discarding would starve the order forever.
+                            fill.price = *order.limit_price;
+                        } else {
+                            // Single-price fill (e.g. close model): the spread-adjusted
+                            // quote is through the limit, so no fill this bar; the
+                            // order stays Working (may fill on a later bar).
+                            fill_opt = std::nullopt;
+                        }
+                    }
+                }
+            }
 
             if (fill_opt) {
                 Fill& fill = *fill_opt;

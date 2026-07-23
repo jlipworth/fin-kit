@@ -36,6 +36,7 @@ using finkit::trading::OrderSide;
 using finkit::trading::Position;
 using finkit::trading::Timestamp;
 using finkit::types::Currency;
+using finkit::types::currency_to_string;
 
 // ============================================================================
 // FX Rate Provider Interface (for multi-currency)
@@ -166,6 +167,18 @@ public:
         auto pos_result = check_position_limits(order, portfolio, fx);
         if (pos_result.decision != RiskDecision::Allow) {
             return pos_result;
+        }
+
+        // Check liquidity limits (ADV-based sizing)
+        auto liq_result = check_liquidity_limits(order, portfolio);
+        if (liq_result.decision != RiskDecision::Allow) {
+            return liq_result;
+        }
+
+        // Check concentration limits (sector / currency gross exposure)
+        auto conc_result = check_concentration_limits(order, portfolio, fx);
+        if (conc_result.decision != RiskDecision::Allow) {
+            return conc_result;
         }
 
         // Check portfolio limits
@@ -374,6 +387,160 @@ private:
                 result.decision = RiskDecision::Reject;
                 result.reason = "Exceeds max leverage";
                 result.violated_limits.push_back("portfolio.max_leverage");
+            }
+        }
+
+        return result;
+    }
+
+    [[nodiscard]] auto lookup_info(const string& symbol) const -> InstrumentRiskInfo {
+        if (auto it = config_.instrument_info.find(symbol);
+            it != config_.instrument_info.end()) {
+            return it->second;
+        }
+        return InstrumentRiskInfo{};
+    }
+
+    [[nodiscard]] auto check_liquidity_limits(const Order& order,
+                                              const IPortfolio& portfolio) -> RiskCheckResult {
+        RiskCheckResult result;
+
+        const auto& lim = config_.limits.liquidity;
+        if (lim.max_adv_pct <= 0.0 && lim.max_order_adv_pct <= 0.0) {
+            return result;
+        }
+        double adv = lookup_info(order.symbol).adv;
+        if (adv <= 0.0) {
+            return result; // unknown liquidity -> not enforced
+        }
+
+        auto current_pos = portfolio.position(order.symbol);
+        double current_qty = current_pos ? current_pos->quantity : 0.0;
+        double new_qty =
+            current_qty + (order.side == OrderSide::Buy ? order.quantity : -order.quantity);
+        double allowed = order.quantity;
+        vector<string> violated;
+
+        // (a) single-order participation cap (applies to buys AND sells - market impact)
+        if (lim.max_order_adv_pct > 0.0) {
+            double order_cap = lim.max_order_adv_pct * adv;
+            if (order.quantity > order_cap) {
+                violated.push_back("liquidity.max_order_adv_pct");
+                allowed = std::min(allowed, order_cap);
+            }
+        }
+
+        // (b) resulting-position cap; skipped when the order reduces |position|
+        if (lim.max_adv_pct > 0.0 && std::abs(new_qty) > std::abs(current_qty)) {
+            double pos_cap = lim.max_adv_pct * adv;
+            if (std::abs(new_qty) > pos_cap) {
+                violated.push_back("liquidity.max_adv_pct");
+                double headroom = pos_cap - std::abs(current_qty);
+                allowed = std::min(allowed, std::max(headroom, 0.0));
+            }
+        }
+
+        if (violated.empty()) {
+            return result;
+        }
+        result.violated_limits = violated;
+        if (allowed > 0.0) {
+            result.decision = RiskDecision::Reduce;
+            result.adjusted_quantity = allowed;
+            result.reason = "Order reduced to satisfy liquidity limits";
+        } else {
+            result.decision = RiskDecision::Reject;
+            result.reason = "Exceeds liquidity (ADV) limits";
+        }
+        return result;
+    }
+
+    [[nodiscard]] auto check_concentration_limits(const Order& order, const IPortfolio& portfolio,
+                                                  const IFXRateProvider& fx) -> RiskCheckResult {
+        RiskCheckResult result;
+
+        const auto& cl = config_.limits.concentration;
+        bool sector_enforced =
+            !cl.max_sector_pct.empty() || cl.default_max_sector_pct < 1.0;
+        bool currency_enforced =
+            !cl.max_currency_pct.empty() || cl.default_max_currency_pct < 1.0;
+        if (!sector_enforced && !currency_enforced) {
+            return result;
+        }
+
+        double nav = portfolio.nav(fx);
+        if (nav <= 0.0) {
+            return result;
+        }
+        Currency base = Currency::USD;
+
+        auto current_pos = portfolio.position(order.symbol);
+        double price = current_pos ? current_pos->market_price : 0.0;
+        if (price <= 0.0) {
+            return result; // no mark yet -> cannot evaluate
+        }
+        double current_qty = current_pos ? current_pos->quantity : 0.0;
+        double new_qty =
+            current_qty + (order.side == OrderSide::Buy ? order.quantity : -order.quantity);
+        if (std::abs(new_qty) <= std::abs(current_qty)) {
+            return result; // never block de-risking
+        }
+
+        InstrumentRiskInfo info_o = lookup_info(order.symbol);
+        Currency ccy_o = config_.instrument_info.count(order.symbol) > 0
+                             ? info_o.currency
+                             : (current_pos ? current_pos->currency : Currency::USD);
+        double new_sym_notional = fx.convert(std::abs(new_qty) * price, ccy_o, base);
+
+        // --- sector ---
+        if (sector_enforced) {
+            const string& sector = info_o.sector; // may be ""
+            double limit = cl.max_sector_pct.count(sector) > 0 ? cl.max_sector_pct.at(sector)
+                                                               : cl.default_max_sector_pct;
+            if (limit < 1.0) {
+                double gross = new_sym_notional;
+                for (const auto& [sym, p] : portfolio.positions()) {
+                    if (sym == order.symbol || p.is_flat()) {
+                        continue;
+                    }
+                    if (lookup_info(sym).sector == sector) {
+                        gross += fx.convert(p.notional(), p.currency, base);
+                    }
+                }
+                if (gross / nav > limit) {
+                    result.decision = RiskDecision::Reject;
+                    result.reason = "Exceeds sector concentration limit";
+                    result.violated_limits.push_back(
+                        "concentration.sector." + (sector.empty() ? string("UNCLASSIFIED") : sector));
+                    return result;
+                }
+            }
+        }
+
+        // --- currency --- (same shape; keyed on denomination currency)
+        if (currency_enforced) {
+            double limit = cl.max_currency_pct.count(ccy_o) > 0 ? cl.max_currency_pct.at(ccy_o)
+                                                                : cl.default_max_currency_pct;
+            if (limit < 1.0) {
+                double gross = new_sym_notional;
+                for (const auto& [sym, p] : portfolio.positions()) {
+                    if (sym == order.symbol || p.is_flat()) {
+                        continue;
+                    }
+                    Currency p_ccy = config_.instrument_info.count(sym) > 0
+                                         ? lookup_info(sym).currency
+                                         : p.currency;
+                    if (p_ccy == ccy_o) {
+                        gross += fx.convert(p.notional(), p.currency, base);
+                    }
+                }
+                if (gross / nav > limit) {
+                    result.decision = RiskDecision::Reject;
+                    result.reason = "Exceeds currency concentration limit";
+                    result.violated_limits.push_back("concentration.currency." +
+                                                     currency_to_string(ccy_o));
+                    return result;
+                }
             }
         }
 
