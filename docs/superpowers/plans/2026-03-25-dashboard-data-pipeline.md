@@ -19,7 +19,30 @@
 ---
 
 
-## Status Update — 2026-03-25
+## Status Update — 2026-07-24
+
+> **Snippet staleness:** the embedded code snippets below reflect the state at
+> the time each step was written. The code is the source of truth; a
+> multi-agent review pass (2026-07-24) hardened several components beyond what
+> the snippets show. Key semantic differences from the snippets:
+> - `persist.ts`: `initPersistence()` now takes a `PersistenceConfig` param
+>   (env reading moved to `index.ts`) and is non-fatal on DB outage;
+>   `STREAM_TABLE_MAP` includes `"calc:implied_rate:"`.
+> - `index.ts`/`redis.ts`: `persistMessage` and `onMessage` are awaited
+>   **before** XACK (at-least-once depends on this); consumer groups are
+>   created **before** a stream is advertised to the consumer loop (NOGROUP
+>   race).
+> - `trpc.ts`: `limit` has `minValue(1)`; LIKE patterns escape `\`, `_`, `%`
+>   via `streamPatternToSqlLike()`; `from`/`to` use `!== undefined`; history
+>   rows return event time (embedded `timestamp`) via `normalizeHistoryData()`.
+> - `useStream.ts`: reconnect lifecycle uses a per-effect `stopped` guard (no
+>   zombie sockets on unmount/deps change).
+> - `StatusBar.tsx`: heartbeat thresholds are green<10s / yellow<30s.
+> - `main.cpp` (finkit-stream): drains its PEL on startup, recreates groups on
+>   NOGROUP, withholds ACKs when a calc window fails, guards ACK/heartbeat
+>   against transient Redis errors.
+> - `ingest.py` (LSEG): looks up RICs in the `Instrument` column, skips NaN
+>   prices, heartbeats only on successful fetch.
 
 **Current branch status:** implemented on `feature/dashboard-data-pipeline` and validated locally in the `dashboard` worktree.
 
@@ -31,6 +54,12 @@
 - Post-plan fixes landed for dashboard history/persistence:
   - `fix: persist implied-rate history in dashboard server`
   - `fix: tighten dashboard history query validation`
+- Historical preload + stitch-to-live: charts now seed from
+  `trpc.history.byStream` (`InstrumentPanel` in `App.tsx`) and merge with live
+  WebSocket updates in `TreasuryChart`.
+- Multi-agent code-review pass (2026-07-24) fixed crash/data-loss/lifecycle
+  defects across `finkit-stream`, the Bun server, the dashboard, and the LSEG
+  adapter (see snippet-staleness note above).
 - Repo-local TSDB/Infisical skill added:
   - `skills/timescaledb-access/SKILL.md`
   - `.claude/agents/timescaledb-access.md`
@@ -38,13 +67,16 @@
 
 **Not yet completed:**
 - Manual LSEG Workspace validation remains outstanding.
-- The dashboard UI is still primarily live-first; historical preload + stitch-to-live behavior is the next product step.
 - Persistence is still the PoC `stream_log` catch-all rather than typed per-table writes.
 
 **Resume here next session:**
-1. Add historical preload + live stitch for `market:futures:*` charts.
-2. Add an integration test covering Redis → Bun persistence → `history.byStream`.
-3. Perform the manual LSEG Workspace validation when credentials/workspace are available.
+1. Add an integration test covering Redis → Bun persistence → `history.byStream` ([#15](https://github.com/jlipworth/fin-kit/issues/15)).
+2. Perform the manual LSEG Workspace validation when credentials/workspace are available ([#14](https://github.com/jlipworth/fin-kit/issues/14)).
+
+Follow-up work from this plan is tracked in GitHub issues (see also
+[#1](https://github.com/jlipworth/fin-kit/issues/1) typed persistence,
+[#2](https://github.com/jlipworth/fin-kit/issues/2) real calculations,
+[#3](https://github.com/jlipworth/fin-kit/issues/3) additional panels).
 
 ---
 

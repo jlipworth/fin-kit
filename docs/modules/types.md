@@ -112,4 +112,3 @@ double full = bond.full_price();  // 99.75
 
 - [bootstrap.md](bootstrap.md) - Uses curve types
 - [basis.md](basis.md) - Uses bond and CIP types
-- [conventions.md](../reference/conventions.md) - Currency convention details

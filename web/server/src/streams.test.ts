@@ -17,6 +17,8 @@ describe("matchesPattern", () => {
 
   test("wildcard in middle", () => {
     expect(matchesPattern("market:rates:ois:1Y", "market:rates:*")).toBe(true);
+    expect(matchesPattern("market:futures:TY", "market:*:TY")).toBe(true);
+    expect(matchesPattern("market:futures:US", "market:*:TY")).toBe(false);
   });
 
   test("heartbeat pattern", () => {

@@ -68,7 +68,7 @@ The DataStore provides unified access to TimescaleDB. Market data is populated b
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| `market_ohlcv` | Price bars | symbol, timestamp, OHLCV |
+| `timeseries_ohlcv` | Price bars (owned by the Python repo — not created by fin-kit) | symbol, timestamp, OHLCV |
 | `rates_sofr_fixings` | Daily SOFR | fixing_date, rate |
 | `rates_sofr_futures` | SR1/SR3 futures | contract_code, price, implied_rate |
 | `rates_ois_quotes` | OIS swap rates | currency, tenor, rate |
@@ -146,7 +146,9 @@ Calculation modules follow a consistent pattern:
 4. **Write** to DataStore (via frameworks)
 
 ```cpp
-// Example: bootstrap a curve
+// Illustrative pseudocode — the load_*/save_* helpers shown here are not
+// implemented; callers currently issue SQL via DataStore::query()/execute()
+// directly (see src/data/data.cppm).
 auto fixings = load_sofr_fixings(store, as_of);
 auto futures = load_sofr_futures(store, as_of);
 auto swaps = load_ois_quotes(store, Currency::USD, as_of);

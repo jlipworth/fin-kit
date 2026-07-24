@@ -201,12 +201,14 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "jl-lseg-toolkit" },
+    { name = "pandas" },
     { name = "redis" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "jl-lseg-toolkit", directory = "jl-lseg-toolkit" },
+    { name = "pandas", specifier = ">=2.0" },
     { name = "redis", specifier = ">=5.0" },
 ]
 

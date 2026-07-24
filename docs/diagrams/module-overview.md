@@ -12,7 +12,15 @@ graph TD
         V[viz]
         B[backtest]
         AN[analysis]
+        CU[curves]
+        BS[basis]
+        BT[bootstrap]
+        VAL[valuation]
+        R[risk]
+        TR[trading]
+        ST[stats]
         D[data]
+        T[types]
         C[core]
     end
 
@@ -20,23 +28,32 @@ graph TD
         QL[QuantLib]
         PQ[libpqxx/TimescaleDB]
         SPD[spdlog]
-        FMT[fmt]
-        JSON[nlohmann_json]
     end
 
     A --> AN
     A --> D
 
     V --> B
-    B --> AN
+    B --> TR
+    B --> R
+    B --> ST
+    B --> T
+    R --> TR
+    R --> ST
+    R --> T
+    TR --> T
     AN --> D
+    AN --> T
     AN --> QL
+    CU --> D
+    CU --> BT
+    CU --> T
+    BS --> T
+    BT --> T
+    VAL --> T
     D --> C
     D --> PQ
-
     C --> SPD
-    C --> FMT
-    C --> JSON
 ```
 
 ## Module Responsibilities
@@ -44,16 +61,19 @@ graph TD
 ```mermaid
 graph LR
     subgraph core["core"]
-        C1[Error Handling]
-        C2[Financial Types]
-        C3[Configuration]
-        C4[Logging]
+        C1[Path Utilities]
+        C2[Logging]
+    end
+
+    subgraph types["types"]
+        T1[Financial Types]
+        T2[Currency Conventions]
     end
 
     subgraph data["data"]
         D1[TimescaleDB Client]
         D2[Schema Manager]
-        D3[Data Schemas]
+        D3[Configuration]
     end
 
     subgraph analysis["analysis"]

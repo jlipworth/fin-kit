@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 interface StreamMessage {
   stream: string;
@@ -18,51 +18,61 @@ interface UseStreamResult {
 
 export function useStream({ url, patterns }: UseStreamOptions): UseStreamResult {
   const wsUrl = url || `ws://${window.location.host}/ws`;
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [connected, setConnected] = useState(false);
   const [latest, setLatest] = useState<Map<string, StreamMessage>>(new Map());
 
   const patternsKey = patterns.join(",");
 
-  const connect = useCallback(() => {
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      setConnected(true);
-      ws.send(JSON.stringify({ subscribe: patterns }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: StreamMessage = JSON.parse(event.data);
-        setLatest((prev) => {
-          const next = new Map(prev);
-          next.set(msg.stream, msg);
-          return next;
-        });
-      } catch {
-        // Ignore malformed
-      }
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      reconnectRef.current = setTimeout(connect, 2000);
-    };
-
-    ws.onerror = () => ws.close();
-
-    wsRef.current = ws;
-  }, [wsUrl, patternsKey]);
-
   useEffect(() => {
-    connect();
-    return () => {
-      clearTimeout(reconnectRef.current);
-      wsRef.current?.close();
+    // Each effect run owns one connection chain. `stopped` keeps a socket's
+    // async onclose (which fires after cleanup) from re-arming the reconnect
+    // timer with a stale closure and leaking zombie connections.
+    let stopped = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const subscribe = patternsKey.length > 0 ? patternsKey.split(",") : [];
+
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        if (stopped) return;
+        setConnected(true);
+        ws?.send(JSON.stringify({ subscribe }));
+      };
+
+      ws.onmessage = (event) => {
+        if (stopped) return;
+        try {
+          const msg: StreamMessage = JSON.parse(event.data);
+          setLatest((prev) => {
+            const next = new Map(prev);
+            next.set(msg.stream, msg);
+            return next;
+          });
+        } catch {
+          // Ignore malformed
+        }
+      };
+
+      ws.onclose = () => {
+        if (stopped) return;
+        setConnected(false);
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => ws?.close();
     };
-  }, [connect]);
+
+    connect();
+
+    return () => {
+      stopped = true;
+      clearTimeout(reconnectTimer);
+      ws?.close();
+      setConnected(false);
+    };
+  }, [wsUrl, patternsKey]);
 
   return { latest, connected };
 }

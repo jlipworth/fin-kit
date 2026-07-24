@@ -347,137 +347,23 @@ Iterative bootstrap: Each instrument adds a node, solving for the discount facto
 
 ---
 
-## 4. Database Schema Implications
+## 4. Database Schema
 
-Based on the above, we need these core tables:
+The authoritative schema is created in code — see `ensure_input_schema()` and
+`ensure_output_schema()` in `src/data/data.cppm`. Actual table names:
 
-### Market Data Tables
-```sql
--- Bonds
-CREATE TABLE bonds (
-    cusip VARCHAR(9) PRIMARY KEY,
-    isin VARCHAR(12),
-    coupon DOUBLE,
-    maturity_date DATE,
-    issue_date DATE,
-    first_coupon_date DATE
-);
+**Input tables:** `bonds_reference`, `bonds_prices`, `futures_treasury`,
+`fx_spot`, `fx_forwards`, `rates_repo`, `rates_sofr_fixings`,
+`rates_sofr_futures`, `rates_ois_quotes`, `reference_fomc_meetings`,
+`reference_holidays`. Price bars come from the Python repo's
+`timeseries_ohlcv` table (external — fin-kit does not create it).
 
-CREATE TABLE bond_prices (
-    cusip VARCHAR(9),
-    as_of TIMESTAMPTZ,
-    clean_price DOUBLE,
-    yield_to_maturity DOUBLE,
-    PRIMARY KEY (cusip, as_of)
-);
+**Output tables:** see `ensure_output_schema()` (calculated results plus the
+`calc_runs` run-tracking table).
 
--- Futures
-CREATE TABLE futures_contracts (
-    contract_code VARCHAR(10) PRIMARY KEY,
-    product_code VARCHAR(5),
-    first_delivery_date DATE,
-    last_delivery_date DATE,
-    last_trade_date DATE,
-    notional DOUBLE
-);
-
-CREATE TABLE futures_prices (
-    contract_code VARCHAR(10),
-    as_of TIMESTAMPTZ,
-    price DOUBLE,
-    PRIMARY KEY (contract_code, as_of)
-);
-
--- FX
-CREATE TABLE fx_spots (
-    base_ccy VARCHAR(3),
-    quote_ccy VARCHAR(3),
-    as_of TIMESTAMPTZ,
-    bid DOUBLE,
-    ask DOUBLE,
-    mid DOUBLE,
-    PRIMARY KEY (base_ccy, quote_ccy, as_of)
-);
-
-CREATE TABLE fx_forwards (
-    base_ccy VARCHAR(3),
-    quote_ccy VARCHAR(3),
-    tenor VARCHAR(5),
-    as_of TIMESTAMPTZ,
-    forward_points_bid DOUBLE,
-    forward_points_ask DOUBLE,
-    forward_points_mid DOUBLE,
-    PRIMARY KEY (base_ccy, quote_ccy, tenor, as_of)
-);
-
--- Repo Rates (Critical for Bond Basis)
-CREATE TABLE repo_rates (
-    as_of DATE,
-    rate_type VARCHAR(20),  -- GC, SOFR, TERM_1W, TERM_1M, etc.
-    rate DOUBLE,
-    PRIMARY KEY (as_of, rate_type)
-);
-
-CREATE TABLE repo_specials (
-    cusip VARCHAR(9),
-    as_of DATE,
-    special_rate DOUBLE,
-    gc_spread DOUBLE,  -- special - GC (negative = on special)
-    PRIMARY KEY (cusip, as_of)
-);
-
--- Interest Rates
-CREATE TABLE rate_fixings (
-    index_name VARCHAR(20),  -- SOFR, ESTR, SONIA, etc.
-    fixing_date DATE,
-    rate DOUBLE,
-    PRIMARY KEY (index_name, fixing_date)
-);
-
-CREATE TABLE ois_quotes (
-    currency VARCHAR(3),
-    tenor VARCHAR(5),
-    as_of TIMESTAMPTZ,
-    rate DOUBLE,
-    PRIMARY KEY (currency, tenor, as_of)
-);
-
-CREATE TABLE rate_futures (
-    contract_code VARCHAR(10) PRIMARY KEY,
-    index_name VARCHAR(20),
-    reference_start DATE,
-    reference_end DATE
-);
-
-CREATE TABLE rate_futures_prices (
-    contract_code VARCHAR(10),
-    as_of TIMESTAMPTZ,
-    price DOUBLE,
-    PRIMARY KEY (contract_code, as_of)
-);
-
--- Cross-Currency
-CREATE TABLE xccy_basis (
-    base_ccy VARCHAR(3),
-    quote_ccy VARCHAR(3),
-    tenor VARCHAR(5),
-    as_of TIMESTAMPTZ,
-    basis_spread DOUBLE,
-    PRIMARY KEY (base_ccy, quote_ccy, tenor, as_of)
-);
-
--- Reference Data
-CREATE TABLE fomc_meetings (
-    meeting_date DATE PRIMARY KEY,
-    has_press_conference BOOLEAN
-);
-
-CREATE TABLE holiday_calendars (
-    calendar_name VARCHAR(20),
-    holiday_date DATE,
-    PRIMARY KEY (calendar_name, holiday_date)
-);
-```
+An earlier draft of this section sketched a different, aspirational schema
+(`bonds`, `bond_prices`, `futures_contracts`, `repo_specials`, …); it was
+removed because none of those tables exist. Consult `data.cppm` for DDL.
 
 ---
 

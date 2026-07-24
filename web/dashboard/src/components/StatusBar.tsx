@@ -18,7 +18,9 @@ export function StatusBar({ connected, heartbeats }: StatusBarProps) {
       <span>{connected ? "Connected" : "Disconnected"}</span>
       {Object.entries(heartbeats).map(([service, ts]) => {
         const age = (now - ts) / 1000;
-        const color = age < 5 ? "green" : age < 15 ? "yellow" : "red";
+        // Slowest publisher (LSEG adapter) heartbeats every 5s, so green must
+        // tolerate a full interval plus jitter without flickering yellow.
+        const color = age < 10 ? "green" : age < 30 ? "yellow" : "red";
         return (
           <span key={service} className="heartbeat-item">
             <span className={`status-dot ${color}`} />

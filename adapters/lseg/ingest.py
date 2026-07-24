@@ -20,6 +20,7 @@ import os
 import sys
 import time
 
+import pandas as pd
 import redis
 from lseg_toolkit.timeseries import LSEGDataClient
 
@@ -67,6 +68,7 @@ def main():
         while True:
             ts = int(time.time() * 1000)
 
+            fetch_ok = False
             try:
                 # Fetch latest snapshot — use get_data for real-time fields
                 df = client.get_data(
@@ -74,22 +76,30 @@ def main():
                     fields=["TRDPRC_1", "SETTLE", "HIGH_1", "LOW_1"],
                 )
 
-                if df is not None and not df.empty:
+                if df is not None and not df.empty and "Instrument" in df.columns:
                     for code, ric in INSTRUMENTS.items():
-                        # Filter rows for this RIC
-                        if ric in df.index:
-                            row = df.loc[ric]
-                        else:
+                        # RICs live in the "Instrument" column, not the index
+                        rows = df[df["Instrument"] == ric]
+                        if rows.empty:
                             continue
+                        row = rows.iloc[-1]
 
-                        price = row.get("TRDPRC_1") or row.get("SETTLE")
+                        # First non-NaN of last trade / settle; NaN is the
+                        # normal LSEG value when there's no last trade, and 0.0
+                        # must not be treated as missing.
+                        price = None
+                        for field in ("TRDPRC_1", "SETTLE"):
+                            val = row.get(field)
+                            if val is not None and pd.notna(val):
+                                price = float(val)
+                                break
                         if price is None:
                             continue
 
                         stream_key = f"market:futures:{code}"
                         r.xadd(
                             stream_key,
-                            {"price": str(float(price)), "timestamp": str(ts)},
+                            {"price": str(price), "timestamp": str(ts)},
                             maxlen=MAXLEN,
                             approximate=True,
                         )
@@ -97,17 +107,20 @@ def main():
                     seq += 1
                     if seq % 5 == 0:
                         print(f"[lseg-adapter] published {seq} snapshots")
+                fetch_ok = True
 
             except Exception as e:
                 print(f"[lseg-adapter] fetch error: {e}", file=sys.stderr)
 
-            # Heartbeat
-            r.xadd(
-                "heartbeat:lseg-adapter",
-                {"status": "ok", "timestamp": str(ts)},
-                maxlen=1000,
-                approximate=True,
-            )
+            # Heartbeat only when the feed is actually alive — a green dot on
+            # the dashboard must not mask a dead LSEG session.
+            if fetch_ok:
+                r.xadd(
+                    "heartbeat:lseg-adapter",
+                    {"status": "ok", "timestamp": str(ts)},
+                    maxlen=1000,
+                    approximate=True,
+                )
 
             time.sleep(args.interval)
     except KeyboardInterrupt:

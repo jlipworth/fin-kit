@@ -24,8 +24,13 @@ export function normalizeHistoryData(data: unknown): Record<string, string> {
   return {};
 }
 
+/**
+ * Convert a stream glob pattern to a SQL LIKE pattern. LIKE metacharacters
+ * in the input (stream names contain `_`) are escaped so an exact name only
+ * matches itself; only `*` becomes a wildcard.
+ */
 export function streamPatternToSqlLike(pattern: string): string {
-  return pattern.replaceAll("*", "%");
+  return pattern.replace(/[\\_%]/g, (c) => `\\${c}`).replace(/\*/g, "%");
 }
 
 export const appRouter = t.router({
@@ -61,17 +66,23 @@ export const appRouter = t.router({
           SELECT stream, data, ts
           FROM stream_log
           WHERE stream LIKE ${streamPatternToSqlLike(input.stream)}
-            ${input.from ? sql`AND ts >= to_timestamp(${input.from} / 1000.0)` : sql``}
-            ${input.to ? sql`AND ts <= to_timestamp(${input.to} / 1000.0)` : sql``}
+            ${input.from !== undefined ? sql`AND ts >= to_timestamp(${input.from} / 1000.0)` : sql``}
+            ${input.to !== undefined ? sql`AND ts <= to_timestamp(${input.to} / 1000.0)` : sql``}
           ORDER BY ts DESC
           LIMIT ${limit}
         `;
 
-        return rows.map((r: any) => ({
-          stream: r.stream as string,
-          data: normalizeHistoryData(r.data),
-          timestamp: new Date(r.ts).getTime(),
-        }));
+        return rows.map((r: any) => {
+          const data = normalizeHistoryData(r.data);
+          // Prefer the message's own event time over the row's ingest time so
+          // historical points share a time base with live WebSocket messages.
+          const eventTs = Number(data.timestamp);
+          return {
+            stream: r.stream as string,
+            data,
+            timestamp: Number.isFinite(eventTs) && eventTs > 0 ? eventTs : new Date(r.ts).getTime(),
+          };
+        });
       }),
   }),
 });

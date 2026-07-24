@@ -88,7 +88,8 @@ LogLinear on discount factors is equivalent to linear interpolation on continuou
 ```cpp
 #include <finkit.bootstrap>
 
-// Gather market data
+// Gather market data (illustrative pseudocode — these loaders are not
+// implemented; query the tables via DataStore::query()/execute() directly)
 vector<SOFRFixing> fixings = load_sofr_fixings(db, as_of);
 vector<SOFRFuture> futures = load_sofr_futures(db, as_of);
 vector<OISQuote> swaps = load_ois_quotes(db, Currency::USD, as_of);

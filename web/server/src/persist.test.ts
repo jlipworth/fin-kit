@@ -29,4 +29,13 @@ describe("streamPatternToSqlLike", () => {
   test("leaves exact stream names unchanged", () => {
     expect(streamPatternToSqlLike("market:futures:TY")).toBe("market:futures:TY");
   });
+
+  test("escapes LIKE metacharacters so underscores match literally", () => {
+    expect(streamPatternToSqlLike("calc:implied_rate:TY")).toBe("calc:implied\\_rate:TY");
+    expect(streamPatternToSqlLike("odd%name")).toBe("odd\\%name");
+  });
+
+  test("escapes metacharacters while translating wildcards", () => {
+    expect(streamPatternToSqlLike("calc:implied_rate:*")).toBe("calc:implied\\_rate:%");
+  });
 });

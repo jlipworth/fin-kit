@@ -16,40 +16,55 @@ const STREAM_TABLE_MAP: Record<string, string> = {
   "calc:curves:sofr": "calculated_curves",
 };
 
+export interface PersistenceConfig {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+}
+
 let sql: ReturnType<typeof postgres> | null = null;
 
-/** Initialize TimescaleDB connection and ensure schema. Skips if TSDB_HOST is not set. */
-export async function initPersistence() {
-  const host = process.env.TSDB_HOST || process.env.POSTGRES_HOST;
-  if (!host) {
+/**
+ * Initialize TimescaleDB connection and ensure schema. Persistence is
+ * best-effort: with no config, or if the database is unreachable at startup,
+ * it is disabled and the rest of the server keeps running.
+ */
+export async function initPersistence(config?: PersistenceConfig) {
+  if (!config) {
     console.log("[persist] TSDB_HOST not set — persistence disabled");
     return;
   }
 
-  sql = postgres({
-    host,
-    port: parseInt(process.env.TSDB_PORT || process.env.POSTGRES_PORT || "5432"),
-    database: process.env.TSDB_DATABASE || process.env.POSTGRES_DB || "timeseries",
-    username: process.env.TSDB_USER || process.env.POSTGRES_USER || "postgres",
-    password: process.env.TSDB_PASSWORD || process.env.POSTGRES_PASSWORD || "",
-  });
+  try {
+    sql = postgres(config);
 
-  // Create the catch-all stream log table if it doesn't exist.
-  // This is a PoC approach — typed per-table inserts are a follow-up.
-  await sql`
-    CREATE TABLE IF NOT EXISTS stream_log (
-      id BIGINT GENERATED ALWAYS AS IDENTITY,
-      stream TEXT NOT NULL,
-      table_name TEXT NOT NULL,
-      data JSONB NOT NULL,
-      ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_stream_log_stream_ts ON stream_log (stream, ts DESC)
-  `;
+    // Create the catch-all stream log table if it doesn't exist.
+    // This is a PoC approach — typed per-table inserts are a follow-up.
+    await sql`
+      CREATE TABLE IF NOT EXISTS stream_log (
+        id BIGINT GENERATED ALWAYS AS IDENTITY,
+        stream TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        data JSONB NOT NULL,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_stream_log_stream_ts ON stream_log (stream, ts DESC)
+    `;
 
-  console.log(`[persist] connected to TimescaleDB at ${host}`);
+    console.log(`[persist] connected to TimescaleDB at ${config.host}`);
+  } catch (err) {
+    console.error("[persist] init failed — persistence disabled:", err);
+    try {
+      await sql?.end({ timeout: 1 });
+    } catch {
+      // Best effort cleanup.
+    }
+    sql = null;
+  }
 }
 
 /** Resolve a stream name to its TimescaleDB table */

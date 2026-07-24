@@ -2,6 +2,14 @@
 
 This document tracks the development roadmap for fin-kit, including completed work, current priorities, and long-term vision.
 
+> **Tracking note (2026-07-24):** all outstanding items below have been
+> migrated to [GitHub issues](https://github.com/jlipworth/fin-kit/issues) —
+> individual issues for active pipeline work and code TODOs (#1–#24), and
+> per-theme umbrella issues with task lists for the long-range phases
+> (#25–#36). GitHub issues are the source of truth for open work; this
+> document remains as strategic context and phase history. Do not add new
+> work items here — file an issue instead.
+
 ---
 
 ## Completed Phases

@@ -28,6 +28,7 @@ public:
     // Order events
     virtual void on_fill(const Fill& fill, StrategyContext& ctx) {}
     virtual void on_order_rejected(const Order& order, const string& reason, StrategyContext& ctx) {}
+    virtual void on_order_cancelled(const Order& order, const string& reason, StrategyContext& ctx) {}
 
     // Risk events
     virtual void on_risk_breach(const RiskBreachEvent& event, StrategyContext& ctx) {}

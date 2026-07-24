@@ -9,8 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-import finkit.core;
-
 namespace redis = sw::redis;
 using Clock = std::chrono::steady_clock;
 
@@ -53,6 +51,12 @@ void ensure_group(redis::Redis& r, const std::string& stream) {
         r.xgroup_create(stream, GROUP, "$", true); // mkstream=true
     } catch (const redis::ReplyError&) {
         // BUSYGROUP — already exists
+    }
+}
+
+void ensure_groups(redis::Redis& r, const std::vector<std::string>& streams) {
+    for (const auto& s : streams) {
+        ensure_group(r, s);
     }
 }
 
@@ -111,9 +115,7 @@ int main() {
         "market:futures:US",
     };
 
-    for (const auto& s : input_streams) {
-        ensure_group(r, s);
-    }
+    ensure_groups(r, input_streams);
 
     std::cout << "[finkit-stream] listening on " << input_streams.size()
               << " streams (window=" << config.calc_window_ms << "ms)\n";
@@ -123,11 +125,10 @@ int main() {
     std::unordered_map<std::string, FuturesQuote> buffer;
     std::unordered_map<std::string, std::vector<std::string>> pending_acks;
 
-    // Build XREADGROUP input once — streams are static
-    std::vector<std::pair<std::string, std::string>> stream_ids;
-    for (const auto& s : input_streams) {
-        stream_ids.emplace_back(s, ">");
-    }
+    // First pass reads this consumer's pending entries (delivered but unacked
+    // before a previous crash/shutdown) so they are reprocessed, then switches
+    // to new-message delivery.
+    bool drain_pending = true;
 
     while (running) {
         // Block for up to calc_window_ms
@@ -135,11 +136,29 @@ int main() {
         using ItemStream = std::vector<Item>;
         std::unordered_map<std::string, ItemStream> results;
 
+        std::vector<std::pair<std::string, std::string>> stream_ids;
+        for (const auto& s : input_streams) {
+            stream_ids.emplace_back(s, drain_pending ? "0" : ">");
+        }
+
         try {
             r.xreadgroup(GROUP, CONSUMER, stream_ids.begin(), stream_ids.end(),
                          std::chrono::milliseconds(config.calc_window_ms),
                          100, // count
                          std::inserter(results, results.end()));
+        } catch (const redis::ReplyError& e) {
+            std::cerr << "[finkit-stream] XREADGROUP error: " << e.what() << "\n";
+            // Groups vanish if Redis restarts without persisted state; recreate
+            // them instead of spinning on NOGROUP forever.
+            if (std::string(e.what()).find("NOGROUP") != std::string::npos) {
+                try {
+                    ensure_groups(r, input_streams);
+                } catch (const redis::Error& ge) {
+                    std::cerr << "[finkit-stream] group recreate failed: " << ge.what() << "\n";
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            continue;
         } catch (const redis::Error& e) {
             std::cerr << "[finkit-stream] XREADGROUP error: " << e.what() << "\n";
             std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -147,11 +166,13 @@ int main() {
         }
 
         // Parse incoming messages into buffer
+        std::size_t item_count = 0;
         for (const auto& [stream, items] : results) {
             // Extract instrument code from stream name: "market:futures:TY" → "TY"
             auto code = stream.substr(stream.rfind(':') + 1);
 
             for (const auto& [id, fields] : items) {
+                ++item_count;
                 FuturesQuote quote{};
                 bool valid = true;
                 for (const auto& [key, val] : fields) {
@@ -174,25 +195,44 @@ int main() {
             }
         }
 
-        // Fire calculations when window expires, then ACK processed messages
+        if (drain_pending && item_count == 0) {
+            drain_pending = false;
+        }
+
+        // Fire calculations when window expires, then ACK processed messages.
+        // ACKs are flushed even when the window held only malformed messages,
+        // and retained for retry when calculations or the ACK itself fail —
+        // at-least-once for calc outputs (redelivery may duplicate them).
         auto now = Clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_calc);
-        if (elapsed.count() >= config.calc_window_ms && !buffer.empty()) {
-            try {
-                run_calculations(r, buffer);
-            } catch (const std::exception& e) {
-                std::cerr << "[finkit-stream] calculation error: " << e.what() << "\n";
-            }
-            buffer.clear();
-            last_calc = now;
-
-            // ACK after calculations complete (at-least-once semantics)
-            for (const auto& [stream, ids] : pending_acks) {
-                for (const auto& id : ids) {
-                    r.xack(stream, GROUP, id);
+        if (elapsed.count() >= config.calc_window_ms &&
+            (!buffer.empty() || !pending_acks.empty())) {
+            bool calc_ok = true;
+            if (!buffer.empty()) {
+                try {
+                    run_calculations(r, buffer);
+                } catch (const std::exception& e) {
+                    std::cerr << "[finkit-stream] calculation error: " << e.what() << "\n";
+                    calc_ok = false;
                 }
             }
-            pending_acks.clear();
+            last_calc = now;
+
+            if (calc_ok) {
+                buffer.clear();
+                try {
+                    for (const auto& [stream, ids] : pending_acks) {
+                        for (const auto& id : ids) {
+                            r.xack(stream, GROUP, id);
+                        }
+                    }
+                    pending_acks.clear();
+                } catch (const redis::Error& e) {
+                    // Partial ACK is fine — re-acking an id is a no-op; retry
+                    // the batch next window.
+                    std::cerr << "[finkit-stream] XACK error: " << e.what() << "\n";
+                }
+            }
         }
 
         // Heartbeat every 2 seconds
@@ -205,8 +245,12 @@ int main() {
                 {"status", "ok"},
                 {"timestamp", std::to_string(ts)},
             };
-            r.xadd("heartbeat:finkit-stream", "*", hb_fields.begin(), hb_fields.end(), 1000LL,
-                   true);
+            try {
+                r.xadd("heartbeat:finkit-stream", "*", hb_fields.begin(), hb_fields.end(), 1000LL,
+                       true);
+            } catch (const redis::Error& e) {
+                std::cerr << "[finkit-stream] heartbeat error: " << e.what() << "\n";
+            }
             last_heartbeat = now;
         }
     }

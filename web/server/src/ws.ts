@@ -9,15 +9,26 @@ export interface WsData {
 /** All active WebSocket connections */
 const clients = new Set<ServerWebSocket<WsData>>();
 
+const patternCache = new Map<string, RegExp>();
+
 /**
  * Test whether a Redis stream name matches a subscription glob pattern.
- * Supports * as a wildcard for any suffix.
+ * Supports * as a wildcard anywhere in the pattern (including the middle);
+ * all other characters match literally.
  */
 export function matchesPattern(stream: string, pattern: string): boolean {
   if (pattern === "*") return true;
   if (!pattern.includes("*")) return stream === pattern;
-  const prefix = pattern.slice(0, pattern.indexOf("*"));
-  return stream.startsWith(prefix);
+  let regex = patternCache.get(pattern);
+  if (!regex) {
+    const escaped = pattern
+      .split("*")
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join(".*");
+    regex = new RegExp(`^${escaped}$`);
+    patternCache.set(pattern, regex);
+  }
+  return regex.test(stream);
 }
 
 /** Register a new WebSocket connection */
@@ -54,7 +65,12 @@ export function fanOut(stream: string, data: Record<string, string>) {
   for (const ws of clients) {
     if (ws.data.patterns.length === 0) continue;
     if (ws.data.patterns.some((p) => matchesPattern(stream, p))) {
-      ws.send(msg);
+      try {
+        ws.send(msg);
+      } catch (err) {
+        // A half-closed socket must not abort fan-out to the other clients.
+        console.error("[ws] send failed:", err);
+      }
     }
   }
 }

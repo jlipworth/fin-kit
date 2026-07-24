@@ -70,6 +70,9 @@ fin-kit/
 │   ├── backtest/   # Backtesting engine
 │   └── viz/        # Visualization
 ├── apps/           # Example applications
+├── services/       # Long-running services (finkit-stream Redis consumer)
+├── adapters/       # Market data publishers (mock, LSEG) → Redis Streams
+├── web/            # Dashboard (React/Vite) and Bun WebSocket/tRPC server
 ├── tests/          # Unit and integration tests
 ├── docs/           # Documentation
 └── ci/             # CI/CD configuration

@@ -54,7 +54,7 @@ Connection parameters can also be set via environment variables (checked before 
 Unified read/write access to TimescaleDB. The schema is shared with the Python repo, so market data written by the Python pipeline is directly available.
 
 **Read tables** (populated by Python repo):
-- `market_ohlcv` - OHLCV price data
+- `timeseries_ohlcv` - OHLCV price bars (external — owned/created by the Python repo)
 - `rates_sofr_fixings`, `rates_sofr_futures`, `rates_ois_quotes` - Interest rates
 - `rates_repo` - Repo rates
 - `bonds_reference`, `bonds_prices` - Bond data
@@ -72,9 +72,13 @@ Unified read/write access to TimescaleDB. The schema is shared with the Python r
 ### Factory Functions
 
 ```cpp
-auto create_data_store(const Config& config) -> DataStore;
-auto create_data_store_from_env() -> DataStore;
+auto create_data_store(const DatabaseConfig& config) -> unique_ptr<DataStore>;
+auto create_data_store(const Config& config) -> unique_ptr<DataStore>;
+auto create_data_store_from_env() -> unique_ptr<DataStore>;
 ```
+
+The factories return `unique_ptr<DataStore>`, so access members with `->`
+(e.g. `store->query(...)`).
 
 ## Run Management
 
@@ -104,12 +108,12 @@ auto store = finkit::data::create_data_store(config);
 auto store = finkit::data::create_data_store_from_env();
 
 // Query market data (populated by Python repo)
-auto result = store.query("SELECT * FROM rates_sofr_fixings WHERE fixing_date >= $1", as_of);
+auto result = store->execute("SELECT * FROM rates_sofr_fixings WHERE fixing_date >= $1", as_of);
 
 // Start a calculation run
-auto run_id = finkit::data::start_run(store, "backtest_v1");
+auto run_id = finkit::data::start_run(*store, "backtest_v1");
 // ... perform calculations ...
-finkit::data::complete_run(store, run_id);
+finkit::data::complete_run(*store, run_id);
 ```
 
 ## Related

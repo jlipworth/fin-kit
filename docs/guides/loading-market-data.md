@@ -75,7 +75,7 @@ Market data tables are populated by the Python repo's data pipeline. For the com
 
 Key tables:
 
-- `market_ohlcv` - OHLCV price bars
+- `timeseries_ohlcv` - OHLCV price bars (external — owned by the Python repo)
 - `bonds_reference` - Bond static data
 - `bonds_prices` - Bond price history
 - `rates_sofr_fixings` - SOFR daily fixings
@@ -87,7 +87,7 @@ Key tables:
 ## Querying Data
 
 ```cpp
-auto result = store.query(R"(
+auto result = store->execute(R"(
     SELECT cusip, clean_price, yield_to_maturity
     FROM bonds_prices
     WHERE as_of >= $1
@@ -107,12 +107,12 @@ The DataStore also writes calculation results, organized by `run_id`:
 
 ```cpp
 // Start a new calculation run
-auto run_id = start_run(store, "Bond Basis Analysis", "abc123def");
+auto run_id = start_run(*store, "Bond Basis Analysis", "abc123def");
 
 // ... run calculations, write results ...
 
 // Mark run complete
-complete_run(store, run_id);
+complete_run(*store, run_id);
 ```
 
 Output tables include:
@@ -135,28 +135,28 @@ void query_bond_basis_data() {
     auto store = finkit::data::create_data_store_from_env();
 
     // Query bond reference data
-    auto bonds = store.query(R"(
+    auto bonds = store->execute(R"(
         SELECT cusip, coupon, maturity, issue_date
         FROM bonds_reference
         WHERE maturity > $1
     )", "2050-01-01");
 
     // Query bond prices
-    auto prices = store.query(R"(
+    auto prices = store->execute(R"(
         SELECT cusip, as_of, clean_price
         FROM bonds_prices
         WHERE as_of = $1
     )", "2024-01-02");
 
     // Query futures
-    auto futures = store.query(R"(
+    auto futures = store->query(R"(
         SELECT contract_code, product, price, first_delivery, last_delivery
         FROM futures_treasury
         WHERE product = 'US'
     )");
 
     // Query repo rates (essential for basis calculations)
-    auto repo = store.query(R"(
+    auto repo = store->execute(R"(
         SELECT as_of, gc_rate, term_days
         FROM rates_repo
         WHERE as_of = $1

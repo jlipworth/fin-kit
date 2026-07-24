@@ -124,7 +124,7 @@ For a more complete example, see the [bond_basis application](../apps/bond_basis
 
 | Module | Purpose |
 |--------|---------|
-| `finkit.core` | Foundation: DateTime, TimeSeries, Result<T,E> |
+| `finkit.core` | Foundation: path utilities, logging |
 | `finkit.data` | TimescaleDB data store, config loading |
 | `finkit.types` | Shared types: Currency, Bond, FXSpot |
 | `finkit.backtest` | Simulation engine, portfolio, strategies |

@@ -28,7 +28,7 @@ Renovatebot is configured via `renovate.json` to automatically create PRs when d
 
 ### How it works
 
-1. **Conan packages** (libpqxx, spdlog, nlohmann_json, tomlplusplus, eigen)
+1. **Conan packages** (libpqxx, redis-plus-plus, spdlog, nlohmann_json, tomlplusplus, eigen)
    - Regex matches `self.requires("name/version")` in `conanfile.py`
    - Checks Conan Center for new versions
 

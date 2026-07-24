@@ -4,12 +4,28 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./trpc";
 import { initPersistence, persistMessage } from "./persist";
 
-const WEB_PORT = parseInt(process.env.WEB_PORT || "3000");
+function envInt(value: string | undefined, fallback: number): number {
+  const n = parseInt(value ?? "", 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const WEB_PORT = envInt(process.env.WEB_PORT, 3000);
 const REDIS_HOST = process.env.REDIS_HOST || "localhost";
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379");
+const REDIS_PORT = envInt(process.env.REDIS_PORT, 6379);
+const TSDB_HOST = process.env.TSDB_HOST || process.env.POSTGRES_HOST;
 
 initRedis(REDIS_HOST, REDIS_PORT);
-await initPersistence();
+await initPersistence(
+  TSDB_HOST
+    ? {
+        host: TSDB_HOST,
+        port: envInt(process.env.TSDB_PORT || process.env.POSTGRES_PORT, 5432),
+        database: process.env.TSDB_DATABASE || process.env.POSTGRES_DB || "timeseries",
+        username: process.env.TSDB_USER || process.env.POSTGRES_USER || "postgres",
+        password: process.env.TSDB_PASSWORD || process.env.POSTGRES_PASSWORD || "",
+      }
+    : undefined,
+);
 
 const server = Bun.serve<WsData>({
   port: WEB_PORT,
@@ -47,10 +63,11 @@ const server = Bun.serve<WsData>({
   websocket: websocketHandler,
 });
 
-// Start Redis consumer → fan out to WebSocket clients and persist
-startConsumer((stream, data) => {
+// Start Redis consumer → fan out to WebSocket clients and persist.
+// Persistence is awaited so the message is not ACKed before the write lands.
+startConsumer(async (stream, data) => {
   fanOut(stream, data);
-  persistMessage(stream, data);
+  await persistMessage(stream, data);
 });
 
 console.log(`[server] listening on http://localhost:${server.port}`);

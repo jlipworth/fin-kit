@@ -3,6 +3,13 @@
 **Date:** 2026-03-24
 **Status:** Approved
 
+> **Implementation deviation (2026-07-24):** the historical API shipped as
+> tRPC, not REST. `web/server/src/trpc.ts` exposes `history.byStream`
+> (stream glob, `from`/`to`/`limit`) at `/api/trpc`; there is no
+> `GET /api/history/:stream` route and no `api.ts`. References to the REST
+> API below describe the original design. See also the deviations list in
+> `../superpowers/plans/2026-03-25-dashboard-data-pipeline.md`.
+
 > **Local-dev prerequisite:** this design assumes the repo build environment is
 > already configured and that Redis can be started locally. Use
 > [../SETUP.md](../SETUP.md) for the core build/toolchain and

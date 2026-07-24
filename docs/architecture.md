@@ -84,7 +84,7 @@ The engines and frameworks are already complicated. Outsource all strong math (w
 ## Layer Architecture
 
 ### Layer 1: Foundation
-- **finkit.core**: Path utilities, logging, DateTime, Decimal, Result<T,E>
+- **finkit.core**: Path utilities, logging
 
 ### Layer 2: Data Access
 - **finkit.data**: Database connection, config loading
@@ -122,10 +122,8 @@ The engines and frameworks are already complicated. Outsource all strong math (w
 
 ### core
 Foundation library providing:
-- **TimeSeries<T>**: Generic time-indexed container
-- **DateTime**: Nanosecond-precision timestamps
-- **Decimal**: Fixed-point arithmetic for financial calculations
-- **Result<T, E>**: Error handling without exceptions
+- **expand_path**: `~`-aware filesystem path expansion
+- **Logging**: `LogLevel` / `set_log_level` over spdlog
 
 ### data
 Data handling with unified access:
