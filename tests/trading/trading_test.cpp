@@ -411,7 +411,11 @@ TEST(TradingTest, ExecEnginePartialFills) {
     BacktestExecutionConfig cfg{.default_slippage_bps = 0.0};
     BacktestExecutionEngine eng(cfg);
     eng.set_fill_model(std::make_unique<ChunkFillModel>(60.0));
-    OrderId id = eng.submit_order(make_market_order("SPY", OrderSide::Buy, 100.0));
+    // GTC: this order must rest across two calendar days to complete. The old
+    // behavior (a Day order living forever) embodied the ignored-TIF defect.
+    auto order = make_market_order("SPY", OrderSide::Buy, 100.0);
+    order.tif = TimeInForce::GTC;
+    OrderId id = eng.submit_order(order);
 
     eng.on_bar(make_bar("SPY", 2024, 1, 2, 10, 10, 10, 10));
     auto f1 = eng.get_pending_fills();
@@ -461,7 +465,11 @@ TEST(TradingTest, HalfSpreadRespectsLimitPrice) {
     BacktestExecutionEngine eng{
         BacktestExecutionConfig{.default_slippage_bps = 0.0, .half_spread_bps = 20.0}};
 
-    auto id = eng.submit_order(make_limit_order("AAA", OrderSide::Buy, 100.0, 50.05));
+    // GTC: the order rests to a later day; a Day order would now (correctly)
+    // expire after its first eligible session instead.
+    auto resting = make_limit_order("AAA", OrderSide::Buy, 100.0, 50.05);
+    resting.tif = TimeInForce::GTC;
+    auto id = eng.submit_order(resting);
     (void)id;
 
     eng.on_bar(make_bar("AAA", 2024, 1, 5, 50, 50, 50, 50));
@@ -494,6 +502,284 @@ TEST(TradingTest, HalfSpreadCapsClampedMarketableLimitAtLimit) {
     EXPECT_DOUBLE_EQ(fills[0].price, 100.0);
     EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Filled);
     EXPECT_TRUE(eng.get_open_orders().empty());
+}
+
+// ============================================================================
+// Stop / StopLimit / LOC semantics (regression: these previously executed as
+// unconditional market orders, ignoring stop_price and their limit)
+// ============================================================================
+
+TEST(TradingTest, StopOrderRestsUntilTriggered) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    Order o;
+    o.symbol = "SPY";
+    o.side = OrderSide::Sell;
+    o.type = OrderType::Stop;
+    o.quantity = 10.0;
+    o.stop_price = 90.0;
+    o.tif = TimeInForce::GTC;
+    OrderId id = eng.submit_order(o);
+
+    // Bar low 95 never touches the 90 stop: the protective stop must NOT fire.
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 101.0, 95.0, 100.0));
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Working);
+
+    // Bar low 89 trades through the stop: triggered, fills at the close.
+    eng.on_bar(make_bar("SPY", 2024, 1, 3, 95.0, 96.0, 89.0, 92.0));
+    auto fills = eng.get_pending_fills();
+    ASSERT_EQ(fills.size(), 1u);
+    EXPECT_DOUBLE_EQ(fills[0].price, 92.0);
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Filled);
+}
+
+TEST(TradingTest, StopLimitNeverFillsThroughItsLimit) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    Order o;
+    o.symbol = "SPY";
+    o.side = OrderSide::Buy;
+    o.type = OrderType::StopLimit;
+    o.quantity = 10.0;
+    o.stop_price = 105.0;
+    o.limit_price = 95.0;
+    o.tif = TimeInForce::GTC;
+    OrderId id = eng.submit_order(o);
+
+    // High 100 < stop 105: not triggered (previously filled at 100, five
+    // points through its own 95 limit).
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 100.0, 99.0, 100.0));
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+
+    // Triggered (high 106 >= 105) but close 100 > limit 95: no fill.
+    eng.on_bar(make_bar("SPY", 2024, 1, 3, 100.0, 106.0, 99.0, 100.0));
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Working);
+
+    // Triggered AND close 94 <= limit 95: fills at 94.
+    eng.on_bar(make_bar("SPY", 2024, 1, 4, 105.0, 106.0, 90.0, 94.0));
+    auto fills = eng.get_pending_fills();
+    ASSERT_EQ(fills.size(), 1u);
+    EXPECT_DOUBLE_EQ(fills[0].price, 94.0);
+}
+
+TEST(TradingTest, LOCRespectsLimitPrice) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    Order o;
+    o.symbol = "SPY";
+    o.side = OrderSide::Buy;
+    o.type = OrderType::LOC;
+    o.quantity = 10.0;
+    o.limit_price = 99.0;
+    o.tif = TimeInForce::GTC;
+    OrderId id = eng.submit_order(o);
+
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 101.0, 99.5, 100.0)); // close 100 > 99
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+
+    eng.on_bar(make_bar("SPY", 2024, 1, 3, 99.0, 99.5, 97.0, 98.0)); // close 98 <= 99
+    auto fills = eng.get_pending_fills();
+    ASSERT_EQ(fills.size(), 1u);
+    EXPECT_DOUBLE_EQ(fills[0].price, 98.0);
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Filled);
+}
+
+// ============================================================================
+// Time-in-force (regression: TIF was ignored entirely)
+// ============================================================================
+
+TEST(TradingTest, DayOrderExpiresAfterItsFirstEligibleSession) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    // Buy limit 90, never marketable at 100; default TIF is Day.
+    OrderId id = eng.submit_order(make_limit_order("SPY", OrderSide::Buy, 10.0, 90.0));
+
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 101.0, 99.0, 100.0)); // first session
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Working);
+
+    // Next calendar day: the Day order expires instead of resting.
+    eng.on_bar(make_bar("SPY", 2024, 1, 3, 100.0, 101.0, 99.0, 100.0));
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Cancelled);
+    EXPECT_TRUE(eng.get_open_orders().empty());
+
+    // Even a crossing bar two months later books NO stale fill (the old
+    // behavior filled here, systematically flattering limit strategies).
+    eng.on_bar(make_bar("SPY", 2024, 3, 10, 89.0, 89.5, 88.0, 89.0));
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+}
+
+TEST(TradingTest, IOCCancelsAfterFirstEligibleBar) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    auto o = make_limit_order("SPY", OrderSide::Buy, 10.0, 90.0);
+    o.tif = TimeInForce::IOC;
+    OrderId id = eng.submit_order(o);
+
+    // A bar for ANOTHER symbol must not consume the IOC.
+    eng.on_bar(make_bar("AAPL", 2024, 1, 2, 100.0, 101.0, 99.0, 100.0));
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Working);
+
+    // First eligible bar, unmarketable: cancelled, not rested.
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 101.0, 99.0, 100.0));
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Cancelled);
+    EXPECT_TRUE(eng.get_open_orders().empty());
+}
+
+TEST(TradingTest, FOKDiscardsPartialFillAndKills) {
+    BacktestExecutionConfig cfg{.default_slippage_bps = 0.0};
+    BacktestExecutionEngine eng(cfg);
+    eng.set_fill_model(std::make_unique<ChunkFillModel>(60.0)); // can only fill 60
+    auto o = make_market_order("SPY", OrderSide::Buy, 100.0);
+    o.tif = TimeInForce::FOK;
+    OrderId id = eng.submit_order(o);
+
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 10, 10, 10, 10));
+    // All-or-none: the 60-share partial is discarded and the order killed.
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+    EXPECT_EQ(eng.get_order(id)->status, OrderStatus::Cancelled);
+    EXPECT_DOUBLE_EQ(eng.get_order(id)->filled_quantity, 0.0);
+}
+
+// ============================================================================
+// Order validation & template reuse (regression: zero-qty NaN fills, stale
+// filled_quantity on resubmitted Order objects)
+// ============================================================================
+
+TEST(TradingTest, ZeroOrNegativeQuantityOrderRejected) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0,
+                                                        .min_commission = 1.0}};
+    OrderId id0 = eng.submit_order(make_market_order("SPY", OrderSide::Buy, 0.0));
+    OrderId idn = eng.submit_order(make_market_order("SPY", OrderSide::Buy, -5.0));
+    EXPECT_EQ(eng.get_order(id0)->status, OrderStatus::Rejected);
+    EXPECT_EQ(eng.get_order(idn)->status, OrderStatus::Rejected);
+    EXPECT_TRUE(eng.get_open_orders().empty());
+
+    // No phantom fill (previously: quantity 0, price NaN, $1 min commission).
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 101.0, 99.0, 100.0));
+    EXPECT_TRUE(eng.get_pending_fills().empty());
+}
+
+TEST(TradingTest, ResubmittedOrderTemplateResetsFillState) {
+    BacktestExecutionEngine eng{BacktestExecutionConfig{.default_slippage_bps = 0.0}};
+    OrderId id1 = eng.submit_order(make_market_order("SPY", OrderSide::Buy, 10.0));
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 100.0, 100.0, 100.0, 100.0));
+    (void)eng.get_pending_fills();
+
+    // Reuse the completed order as a template (filled_quantity = 10 inherited).
+    Order tmpl = *eng.get_order(id1);
+    tmpl.quantity = 20.0;
+    OrderId id2 = eng.submit_order(tmpl);
+    EXPECT_DOUBLE_EQ(eng.get_order(id2)->filled_quantity, 0.0);
+
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 110.0, 110.0, 110.0, 110.0));
+    auto fills = eng.get_pending_fills();
+    ASSERT_EQ(fills.size(), 1u);
+    // Previously: a 20 - 10 = 10-share (or with equal qty a 0-share NaN) fill.
+    EXPECT_DOUBLE_EQ(fills[0].quantity, 20.0);
+    EXPECT_DOUBLE_EQ(fills[0].price, 110.0);
+    EXPECT_DOUBLE_EQ(eng.get_order(id2)->avg_fill_price, 110.0);
+    EXPECT_EQ(eng.get_order(id2)->status, OrderStatus::Filled);
+}
+
+// ============================================================================
+// modify_order routing & PartialFill (regression: PartialFill unmodifiable,
+// stop trigger unmodifiable, non-positive quantities accepted)
+// ============================================================================
+
+TEST(TradingTest, ModifyRoutesPriceByTypeAndValidatesQty) {
+    BacktestExecutionEngine eng;
+    Order stop;
+    stop.symbol = "SPY";
+    stop.side = OrderSide::Sell;
+    stop.type = OrderType::Stop;
+    stop.quantity = 10.0;
+    stop.stop_price = 90.0;
+    stop.tif = TimeInForce::GTC;
+    OrderId sid = eng.submit_order(stop);
+
+    // Price modification of a plain Stop moves its trigger, not limit_price.
+    EXPECT_TRUE(eng.modify_order(sid, std::nullopt, 85.0));
+    ASSERT_TRUE(eng.get_order(sid)->stop_price.has_value());
+    EXPECT_DOUBLE_EQ(*eng.get_order(sid)->stop_price, 85.0);
+    EXPECT_FALSE(eng.get_order(sid)->limit_price.has_value());
+
+    // Non-positive quantity is rejected (would create a NaN-priced fill).
+    EXPECT_FALSE(eng.modify_order(sid, 0.0, std::nullopt));
+    EXPECT_FALSE(eng.modify_order(sid, -1.0, std::nullopt));
+    EXPECT_DOUBLE_EQ(eng.get_order(sid)->quantity, 10.0);
+}
+
+TEST(TradingTest, ModifyAcceptsPartiallyFilledOrder) {
+    BacktestExecutionConfig cfg{.default_slippage_bps = 0.0};
+    BacktestExecutionEngine eng(cfg);
+    eng.set_fill_model(std::make_unique<ChunkFillModel>(60.0));
+    auto o = make_limit_order("SPY", OrderSide::Buy, 100.0, 10.0);
+    o.tif = TimeInForce::GTC;
+    OrderId id = eng.submit_order(o);
+    eng.on_bar(make_bar("SPY", 2024, 1, 2, 10, 10, 10, 10));
+    ASSERT_EQ(eng.get_order(id)->status, OrderStatus::PartialFill);
+
+    // cancel_order accepts PartialFill; modify_order must too (repricing a
+    // partially filled limit order was impossible).
+    EXPECT_TRUE(eng.modify_order(id, std::nullopt, 12.0));
+    EXPECT_DOUBLE_EQ(*eng.get_order(id)->limit_price, 12.0);
+}
+
+// ============================================================================
+// OrderBook bookkeeping guards
+// ============================================================================
+
+TEST(TradingTest, OrderBookCancelledOrderIgnoresLateFill) {
+    OrderBook book;
+    auto o = make_market_order("SPY", OrderSide::Buy, 100.0);
+    o.id = OrderId{1};
+    book.add_order(o);
+    book.update_order(OrderId{1}, OrderStatus::Cancelled);
+    book.apply_fill(Fill{.order_id = OrderId{1},
+                         .symbol = "SPY",
+                         .side = OrderSide::Buy,
+                         .quantity = 100.0,
+                         .price = 10.0});
+    // The late fill must not resurrect the cancelled order.
+    EXPECT_EQ(book.get_order(OrderId{1})->status, OrderStatus::Cancelled);
+    EXPECT_DOUBLE_EQ(book.get_order(OrderId{1})->filled_quantity, 0.0);
+    EXPECT_TRUE(book.get_fills_for_order(OrderId{1}).empty());
+    EXPECT_TRUE(book.get_all_fills().empty());
+}
+
+TEST(TradingTest, OrderBookZeroQuantityFillNoNaN) {
+    OrderBook book;
+    auto o = make_market_order("SPY", OrderSide::Buy, 100.0);
+    o.id = OrderId{1};
+    book.add_order(o);
+    book.apply_fill(Fill{.order_id = OrderId{1},
+                         .symbol = "SPY",
+                         .side = OrderSide::Buy,
+                         .quantity = 0.0,
+                         .price = 10.0});
+    auto after = book.get_order(OrderId{1});
+    ASSERT_TRUE(after.has_value());
+    EXPECT_DOUBLE_EQ(after->filled_quantity, 0.0);
+    EXPECT_FALSE(std::isnan(after->avg_fill_price)); // was 0/0 = NaN
+    EXPECT_DOUBLE_EQ(after->avg_fill_price, 0.0);
+}
+
+TEST(TradingTest, OrderBookDuplicateAddKeepsOriginal) {
+    OrderBook book;
+    auto o = make_market_order("SPY", OrderSide::Buy, 100.0);
+    o.id = OrderId{1};
+    book.add_order(o);
+    book.apply_fill(Fill{.order_id = OrderId{1},
+                         .symbol = "SPY",
+                         .side = OrderSide::Buy,
+                         .quantity = 60.0,
+                         .price = 10.0});
+    // Re-adding the same id must not reset filled_quantity while the fill
+    // history is retained (order state and fills would diverge).
+    auto dup = make_market_order("SPY", OrderSide::Buy, 5.0);
+    dup.id = OrderId{1};
+    book.add_order(dup);
+    EXPECT_DOUBLE_EQ(book.get_order(OrderId{1})->quantity, 100.0);
+    EXPECT_DOUBLE_EQ(book.get_order(OrderId{1})->filled_quantity, 60.0);
+    EXPECT_EQ(book.get_fills_for_order(OrderId{1}).size(), 1u);
 }
 
 TEST(TradingTest, ExecEngineCancel) {

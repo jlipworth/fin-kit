@@ -6,6 +6,7 @@
 module;
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -166,7 +167,12 @@ struct TickEvent {
 /// Order book tracks orders and fills
 class OrderBook {
 public:
-    void add_order(const Order& order) { orders_[order.id] = order; }
+    void add_order(const Order& order) {
+        // Ignore duplicate ids: silently overwriting would reset the stored
+        // filled_quantity while fills_by_order_ keeps the old fills, letting
+        // order state and fill history diverge.
+        orders_.emplace(order.id, order);
+    }
 
     void update_order(OrderId id, OrderStatus status) {
         if (auto it = orders_.find(id); it != orders_.end()) {
@@ -175,16 +181,29 @@ public:
     }
 
     void apply_fill(const Fill& fill) {
+        // A terminal order accepts no fills: a late fill must not resurrect a
+        // cancelled/rejected order into PartialFill/Filled.
+        if (auto it = orders_.find(fill.order_id); it != orders_.end()) {
+            if (it->second.status == OrderStatus::Cancelled ||
+                it->second.status == OrderStatus::Rejected) {
+                return;
+            }
+        }
+
         fills_by_order_[fill.order_id].push_back(fill);
         all_fills_.push_back(fill);
 
         // Update order
         if (auto it = orders_.find(fill.order_id); it != orders_.end()) {
             it->second.filled_quantity += fill.quantity;
-            double old_value =
-                it->second.avg_fill_price * (it->second.filled_quantity - fill.quantity);
-            double new_value = fill.price * fill.quantity;
-            it->second.avg_fill_price = (old_value + new_value) / it->second.filled_quantity;
+            // Guard the weighted average against a zero-quantity fill on an
+            // unfilled order (0/0 would poison avg_fill_price with NaN).
+            if (it->second.filled_quantity > 1e-10) {
+                double old_value =
+                    it->second.avg_fill_price * (it->second.filled_quantity - fill.quantity);
+                double new_value = fill.price * fill.quantity;
+                it->second.avg_fill_price = (old_value + new_value) / it->second.filled_quantity;
+            }
 
             if (it->second.filled_quantity >= it->second.quantity - 1e-10) {
                 it->second.status = OrderStatus::Filled;

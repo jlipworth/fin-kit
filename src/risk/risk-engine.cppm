@@ -119,6 +119,14 @@ public:
     // State
     [[nodiscard]] virtual auto get_state() const -> PortfolioState = 0;
     [[nodiscard]] virtual auto is_symbol_locked(const string& symbol) const -> bool = 0;
+
+    /// Re-arm after a completed liquidation: clears the liquidation state and
+    /// any symbol locks. On the interface so callers that own the engine via
+    /// IRiskEngine (e.g. the backtest engine) can actually reach it — without
+    /// this, locks leak for the remainder of the run. Note: if the portfolio's
+    /// high-water mark still implies a breached drawdown, the next monitor()
+    /// re-triggers liquidation.
+    virtual void reset_liquidation() {}
 };
 
 // ============================================================================
@@ -136,9 +144,14 @@ public:
         // Check if we're in liquidation mode
         if (state_ == PortfolioState::Liquidating) {
             auto pos = portfolio.position(order.symbol);
+            // "Reducing" means moving |position| toward zero WITHOUT crossing:
+            // the order must be opposite-side and no larger than the open
+            // quantity (a buy of 1000 against a 10-share short is not reducing,
+            // it flips the book long).
             bool is_reducing =
                 pos.has_value() && ((pos->quantity > 0 && order.side == OrderSide::Sell) ||
-                                    (pos->quantity < 0 && order.side == OrderSide::Buy));
+                                    (pos->quantity < 0 && order.side == OrderSide::Buy)) &&
+                order.quantity <= std::abs(pos->quantity) + 1e-9;
 
             if (!is_reducing) {
                 result.decision = RiskDecision::Reject;
@@ -146,6 +159,16 @@ public:
                 result.conflicts_with_liquidation = true;
                 return result;
             }
+        }
+
+        // The engine's own liquidation orders are tagged at generation time.
+        // They must bypass the symbol locks (which exist to keep OTHER order
+        // flow away from positions being liquidated) and the remaining limit
+        // checks — otherwise forced liquidation deadlocks on its own lock and
+        // can never execute.
+        if (auto md = order.metadata.find("source");
+            md != order.metadata.end() && md->second == "risk_liquidation") {
+            return result; // Allow
         }
 
         // Check if symbol is locked
@@ -204,12 +227,13 @@ public:
         vector<RiskActionEvent> actions;
 
         double nav = portfolio.nav(fx);
-        if (nav <= 0)
-            return actions;
 
-        // Check drawdown limit
+        // Check drawdown limit. NOTE: nav <= 0 must NOT short-circuit here —
+        // a wiped-out (or negative) NAV is a drawdown of >= 100% and is exactly
+        // when liquidation matters most. The state latch below ensures the
+        // Liquidate event fires once per breach, not on every monitor() call.
         double hwm = portfolio.high_water_mark();
-        if (hwm > 0) {
+        if (hwm > 0 && state_ != PortfolioState::Liquidating) {
             double drawdown = (hwm - nav) / hwm;
 
             if (drawdown > config_.limits.pnl.max_drawdown_pct) {
@@ -291,7 +315,7 @@ public:
     }
 
     // Reset liquidation state (after liquidation completes)
-    void reset_liquidation() {
+    void reset_liquidation() override {
         state_ = PortfolioState::Normal;
         locked_symbols_.clear();
         active_liquidation_reason_.clear();
@@ -329,8 +353,13 @@ private:
             result.reason = "Exceeds max quantity limit";
             result.violated_limits.push_back("position.max_quantity");
 
-            // Calculate adjusted quantity for reduce
-            double max_change = limits.max_quantity - std::abs(current_qty);
+            // Adjusted quantity for Reduce. The headroom is SIGNED: a buy may
+            // add up to (max - current), a sell up to (max + current) — e.g. a
+            // 50-share short with max 100 leaves a buy headroom of 150 (final
+            // position +100), not 50.
+            double max_change = (order.side == OrderSide::Buy)
+                                    ? limits.max_quantity - current_qty
+                                    : limits.max_quantity + current_qty;
             if (max_change > 0) {
                 result.decision = RiskDecision::Reduce;
                 result.adjusted_quantity = max_change;
@@ -341,9 +370,14 @@ private:
         if (limits.max_concentration_pct < 1.0) {
             double nav = portfolio.nav(fx);
             if (nav > 0) {
-                double price = current_pos ? current_pos->market_price : 0.0;
+                double price = mark_price(order, current_pos);
                 if (price > 0) {
-                    double new_notional = std::abs(new_qty) * price;
+                    // NAV is base-currency (USD): the position notional must be
+                    // FX-converted before dividing, or non-USD instruments are
+                    // measured on the wrong scale.
+                    Currency ccy = instrument_currency(order.symbol, current_pos);
+                    double new_notional =
+                        fx.convert(std::abs(new_qty) * price, ccy, Currency::USD);
                     double concentration = new_notional / nav;
 
                     if (concentration > limits.max_concentration_pct) {
@@ -358,6 +392,28 @@ private:
         return result;
     }
 
+    /// Best available mark for pre-trade projections: the position's market
+    /// price when a position exists, else the order's own limit price. Market
+    /// orders in a brand-new symbol still have no price (returns 0), in which
+    /// case notional-based checks cannot be evaluated and are skipped.
+    [[nodiscard]] static auto mark_price(const Order& order,
+                                         const optional<Position>& pos) -> double {
+        if (pos && pos->market_price > 0.0) {
+            return pos->market_price;
+        }
+        return order.limit_price.value_or(0.0);
+    }
+
+    /// Denomination currency for a symbol: instrument reference data when
+    /// available, else the live position's currency, else USD.
+    [[nodiscard]] auto instrument_currency(const string& symbol,
+                                           const optional<Position>& pos) const -> Currency {
+        if (auto it = config_.instrument_info.find(symbol); it != config_.instrument_info.end()) {
+            return it->second.currency;
+        }
+        return pos ? pos->currency : Currency::USD;
+    }
+
     [[nodiscard]] auto check_portfolio_limits(const Order& order, const IPortfolio& portfolio,
                                               const IFXRateProvider& fx) -> RiskCheckResult {
         RiskCheckResult result;
@@ -365,14 +421,23 @@ private:
         auto metrics = get_metrics(portfolio, fx);
         double nav = portfolio.nav(fx);
 
-        // Estimate impact of order
+        // Estimate the order's impact as the SIGNED change in |position|
+        // notional, FX-converted to the base currency (metrics.gross_exposure
+        // is USD). Adding the raw order notional was doubly wrong: sells that
+        // de-risk the book inflated projected gross, and non-USD notionals
+        // were mixed into a USD aggregate unconverted.
         auto current_pos = portfolio.position(order.symbol);
-        double price = current_pos ? current_pos->market_price : 0.0;
-        double order_notional = order.quantity * price;
+        double price = mark_price(order, current_pos);
+        double current_qty = current_pos ? current_pos->quantity : 0.0;
+        double new_qty =
+            current_qty + (order.side == OrderSide::Buy ? order.quantity : -order.quantity);
+        Currency ccy = instrument_currency(order.symbol, current_pos);
+        double exposure_delta =
+            fx.convert((std::abs(new_qty) - std::abs(current_qty)) * price, ccy, Currency::USD);
 
         // Check gross exposure
         if (config_.limits.portfolio.max_gross_exposure > 0) {
-            double new_gross = metrics.gross_exposure + order_notional;
+            double new_gross = metrics.gross_exposure + exposure_delta;
             if (new_gross > config_.limits.portfolio.max_gross_exposure) {
                 result.decision = RiskDecision::Reject;
                 result.reason = "Exceeds max gross exposure";
@@ -382,7 +447,7 @@ private:
 
         // Check leverage
         if (config_.limits.portfolio.max_leverage > 0 && nav > 0) {
-            double new_leverage = (metrics.gross_exposure + order_notional) / nav;
+            double new_leverage = (metrics.gross_exposure + exposure_delta) / nav;
             if (new_leverage > config_.limits.portfolio.max_leverage) {
                 result.decision = RiskDecision::Reject;
                 result.reason = "Exceeds max leverage";

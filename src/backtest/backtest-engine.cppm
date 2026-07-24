@@ -6,12 +6,13 @@
 
 module;
 
-#include <Eigen/Dense>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <ql/quantlib.hpp>
 #include <set>
+#include <span>
 #include <string>
 #include <uuid/uuid.h>
 #include <vector>
@@ -23,6 +24,7 @@ import :strategy;
 import finkit.types;
 import finkit.trading;
 import finkit.risk;
+import finkit.stats;
 
 export namespace finkit::backtest {
 
@@ -33,6 +35,7 @@ using std::unique_ptr;
 using std::vector;
 
 namespace ql = QuantLib;
+namespace stats = finkit::stats;
 
 using finkit::risk::IFXRateProvider;
 using finkit::risk::IRiskEngine;
@@ -46,6 +49,7 @@ using finkit::trading::Fill;
 using finkit::trading::Order;
 using finkit::trading::OrderId;
 using finkit::trading::Timestamp;
+using finkit::types::Currency;
 
 // ============================================================================
 // Data Feed Interface
@@ -140,6 +144,18 @@ public:
         delisted_.clear();
         daily_returns_.clear();
 
+        // Reset metric-accumulation state.
+        gross_profit_ = 0.0;
+        gross_loss_ = 0.0;
+        sum_trade_pnl_ = 0.0;
+        holding_periods_days_.clear();
+        open_time_.clear();
+        dd_sum_ = 0.0;
+        dd_count_ = 0;
+        peak_time_ = Timestamp{};
+        have_peak_time_ = false;
+        underwater_ = false;
+
         if (!data_feed_) {
             return result_;
         }
@@ -171,11 +187,15 @@ public:
         // Initialize high water mark
         double initial_nav = portfolio_.nav(*fx_provider_);
         portfolio_.update_high_water_mark(initial_nav);
+
+        // Daily-return sampling state: prev_nav is the NAV at the last sampled
+        // day boundary; day_has_bars marks that at least one bar was processed
+        // since, so the day contributes exactly one return sample.
         double prev_nav = initial_nav;
+        bool day_has_bars = false;
 
         // Main loop
         ql::Date prev_date = config_.start_date;
-        int bar_count = 0;
 
         data_feed_->reset();
         while (data_feed_->has_more()) {
@@ -201,6 +221,17 @@ public:
 
             // Check for new trading day
             if (current_date != prev_date) {
+                // Day boundary: the previous day's NAV is final, so record its
+                // return. Returns are sampled per CALENDAR DAY (not per bar):
+                // sampling every bar of a multi-symbol/intraday feed and then
+                // annualizing with sqrt(252) systematically distorted Sharpe.
+                // For single-symbol daily feeds this produces exactly the same
+                // series as the old per-bar sampling.
+                if (day_has_bars) {
+                    sample_daily_return(prev_nav);
+                    day_has_bars = false;
+                }
+
                 // Accrue overnight borrow on short positions before marking the new
                 // day, so fees use each short's last-marked (previous-day) value.
                 accrue_borrow_costs(prev_date, current_date);
@@ -228,20 +259,23 @@ public:
             // Process fills
             auto fills = execution_engine_.get_pending_fills();
             for (const auto& fill : fills) {
-                portfolio_.apply_fill(fill);
+                // Capture pre-fill position state so per-fill realized P&L and the
+                // position-lifecycle (open/close) tracking use the entry cost, not the
+                // post-fill state (which apply_fill may have reset on a flat close).
+                auto pos_before = portfolio_.position(fill.symbol);
+                double qty_before = pos_before ? pos_before->quantity : 0.0;
+                double avg_before = pos_before ? pos_before->avg_cost : 0.0;
+                bool was_flat = std::abs(qty_before) < 1e-10;
+
+                portfolio_.apply_fill(fill, instrument_currency(fill.symbol));
                 result_.total_trades++;
 
-                double pnl = (fill.side == finkit::trading::OrderSide::Sell)
-                                 ? (fill.price - get_avg_cost(fill.symbol)) * fill.quantity
-                                 : 0.0;
+                double pnl = realized_pnl(fill, qty_before, avg_before);
+                record_trade_pnl(pnl);
 
-                if (pnl > 0) {
-                    result_.winning_trades++;
-                    result_.largest_winner = std::max(result_.largest_winner, pnl);
-                } else if (pnl < 0) {
-                    result_.losing_trades++;
-                    result_.largest_loser = std::min(result_.largest_loser, pnl);
-                }
+                auto pos_after = portfolio_.position(fill.symbol);
+                bool is_flat = !pos_after || pos_after->is_flat();
+                track_position_lifecycle(fill.symbol, was_flat, is_flat, fill.fill_time);
 
                 for (auto& strategy : strategies_) {
                     strategy->on_fill(fill, ctx);
@@ -250,6 +284,10 @@ public:
 
             // Active risk monitoring
             auto risk_actions = risk_engine_->monitor(portfolio_, *fx_provider_, bar.timestamp);
+            // Each action event emitted by active monitoring is a limit breach the
+            // engine had to respond to (distinct from `orders_rejected`, which counts
+            // pre-trade rejections).
+            result_.risk_breaches += static_cast<int>(risk_actions.size());
             for (const auto& action : risk_actions) {
                 for (auto& strategy : strategies_) {
                     strategy->on_risk_action(action, ctx);
@@ -270,19 +308,46 @@ public:
 
             // Update equity curve
             double current_nav = portfolio_.nav(*fx_provider_);
+
+            // Drawdown-duration tracking (peak-to-recovery span, in days). Capture the
+            // high-water mark BEFORE it absorbs the current bar so we can detect whether
+            // this bar is at/above the prior peak (recovery / new high) or below it
+            // (underwater). The longest peak-to-recovery span is the max drawdown
+            // duration; an unrecovered drawdown contributes its peak-to-final span.
+            double prev_hwm = portfolio_.high_water_mark();
+            if (!have_peak_time_) {
+                peak_time_ = bar.timestamp;
+                have_peak_time_ = true;
+            }
+            if (current_nav >= prev_hwm) {
+                if (underwater_) {
+                    result_.max_drawdown_duration_days = std::max(
+                        result_.max_drawdown_duration_days, days_between(peak_time_, bar.timestamp));
+                    underwater_ = false;
+                }
+                peak_time_ = bar.timestamp; // at/above prior peak: advance the peak time
+            } else {
+                underwater_ = true;
+                result_.max_drawdown_duration_days = std::max(
+                    result_.max_drawdown_duration_days, days_between(peak_time_, bar.timestamp));
+            }
+
             portfolio_.update_high_water_mark(current_nav);
 
             double drawdown = portfolio_.drawdown(*fx_provider_);
             result_.max_drawdown_pct = std::max(result_.max_drawdown_pct, drawdown);
+            // Time-averaged drawdown: mean of the per-bar drawdown series.
+            dd_sum_ += drawdown;
+            ++dd_count_;
 
-            // Track daily return for Sharpe calculation
-            if (bar_count % config_.equity_snapshot_frequency_bars == 0) {
-                double daily_return = (current_nav - prev_nav) / prev_nav;
-                daily_returns_.push_back(daily_return);
-                prev_nav = current_nav;
-            }
+            // This bar belongs to the current (still-open) day; its return is
+            // sampled at the next day boundary (or the end-of-run flush).
+            day_has_bars = true;
+        }
 
-            bar_count++;
+        // Flush the final (never-closed) day's return.
+        if (day_has_bars) {
+            sample_daily_return(prev_nav);
         }
 
         // Call strategy on_finish
@@ -294,24 +359,76 @@ public:
         result_.final_nav = portfolio_.nav(*fx_provider_);
         result_.total_return_pct = (result_.final_nav - initial_nav) / initial_nav;
 
+        // ------------------------------------------------------------------
+        // Trade statistics
+        // ------------------------------------------------------------------
         if (result_.total_trades > 0) {
             result_.win_rate = static_cast<double>(result_.winning_trades) /
                                static_cast<double>(result_.total_trades);
+            // Mean per-fill realized P&L. Opening fills contribute 0, matching the
+            // realized-P&L convention used for the winner/loser classification.
+            result_.avg_trade_pnl =
+                sum_trade_pnl_ / static_cast<double>(result_.total_trades);
+        }
+        if (result_.winning_trades > 0) {
+            result_.avg_winner = gross_profit_ / static_cast<double>(result_.winning_trades);
+        }
+        if (result_.losing_trades > 0) {
+            // Stored as a negative number (loss), mirroring largest_loser.
+            result_.avg_loser = -gross_loss_ / static_cast<double>(result_.losing_trades);
+        }
+        // Profit factor = gross profit / gross loss. Left at 0.0 when there are no
+        // losing trades (ratio is otherwise undefined / infinite).
+        if (gross_loss_ > 1e-10) {
+            result_.profit_factor = gross_profit_ / gross_loss_;
+        }
+        // Average holding period over completed round trips (position flat -> non-flat
+        // -> flat). 0.0 when no round trip completed (e.g. a position still open at the
+        // end of the run).
+        if (!holding_periods_days_.empty()) {
+            double sum = 0.0;
+            for (double d : holding_periods_days_) {
+                sum += d;
+            }
+            result_.avg_holding_period_days =
+                sum / static_cast<double>(holding_periods_days_.size());
         }
 
-        // Calculate Sharpe ratio using Eigen for numerical stability
+        // Average drawdown: time-weighted mean of the per-bar drawdown series.
+        if (dd_count_ > 0) {
+            result_.avg_drawdown_pct = dd_sum_ / static_cast<double>(dd_count_);
+        }
+
+        // ------------------------------------------------------------------
+        // Return-based risk metrics (finkit.stats; daily-bar convention, 252/yr).
+        // The daily-return series is the same one used for Sharpe, so every ratio
+        // shares the engine's leading-zero first-bar return and per-bar sampling.
+        // ------------------------------------------------------------------
+        const std::span<const double> returns_span{daily_returns_};
+        // Sharpe: sample std dev (n-1), annualized sqrt(252) — identical convention to
+        // the previous inline computation, so pinned expected values are preserved.
+        result_.sharpe_ratio = stats::sharpe_ratio(returns_span);
+        // Sortino: downside deviation (population divisor n over all obs), target 0.
+        // Returns 0 when there are fewer than 2 sub-target observations.
+        result_.sortino_ratio = stats::sortino_ratio(returns_span);
+        // Calmar: geometric annualized return / max drawdown, both derived from the
+        // return series (max drawdown here is the return-series drawdown, which may
+        // differ marginally from the NAV-based max_drawdown_pct above).
+        result_.calmar_ratio = stats::calmar_ratio(returns_span);
+
         if (daily_returns_.size() >= 2) {
-            const auto n = static_cast<Eigen::Index>(daily_returns_.size());
-            Eigen::Map<const Eigen::VectorXd> returns(daily_returns_.data(), n);
-
-            double mean_return = returns.mean();
-            Eigen::VectorXd centered = returns.array() - mean_return;
-            // Sample std dev (n-1) for consistency with stats::sharpe_ratio
-            double std_dev = std::sqrt(centered.squaredNorm() / static_cast<double>(n - 1));
-
-            if (std_dev > 1e-10) {
-                result_.sharpe_ratio = mean_return / std_dev * std::sqrt(252.0);
+            // CAGR: geometric compound annual growth rate (years = n / 252).
+            auto metrics = stats::calculate_return_metrics(returns_span);
+            result_.cagr = metrics.annualized_return;
+            // Annualized return (arithmetic): mean per-period return * periods/year.
+            // Deliberately distinct from `cagr` (geometric) so the two fields carry
+            // complementary information; stats owns the non-trivial statistics.
+            double mean_return = 0.0;
+            for (double r : daily_returns_) {
+                mean_return += r;
             }
+            mean_return /= static_cast<double>(daily_returns_.size());
+            result_.annualized_return_pct = mean_return * 252.0;
         }
 
         return result_;
@@ -371,9 +488,86 @@ private:
         return execution_engine_.submit_order(order);
     }
 
-    [[nodiscard]] auto get_avg_cost(const string& symbol) const -> double {
-        auto pos = portfolio_.position(symbol);
-        return pos ? pos->avg_cost : 0.0;
+    /// Sample one daily return against the last day-boundary NAV and advance the
+    /// boundary. Guards against a zero/negative base (e.g. initial_capital = 0):
+    /// a return is only well-defined for a positive base, otherwise 0 is recorded
+    /// instead of letting inf/NaN poison the Sharpe/Sortino inputs.
+    void sample_daily_return(double& prev_nav) {
+        double current_nav = portfolio_.nav(*fx_provider_);
+        double ret = (prev_nav > 1e-12 || prev_nav < -1e-12)
+                         ? (current_nav - prev_nav) / prev_nav
+                         : 0.0;
+        daily_returns_.push_back(ret);
+        prev_nav = current_nav;
+    }
+
+    /// Denomination currency of an instrument: risk reference data when present
+    /// (config_.risk.instrument_info), else the backtest base currency. Threaded
+    /// into Portfolio::apply_fill so non-base-currency instruments move the right
+    /// cash bucket and are FX-converted in NAV (previously hardcoded to USD).
+    [[nodiscard]] auto instrument_currency(const string& symbol) const -> Currency {
+        if (auto it = config_.risk.instrument_info.find(symbol);
+            it != config_.risk.instrument_info.end()) {
+            return it->second.currency;
+        }
+        return config_.base_currency;
+    }
+
+    /// Per-fill realized P&L against the pre-fill position, matching the realized-P&L
+    /// bookkeeping in Portfolio::apply_fill: a sell realizes on the portion of a prior
+    /// long it closes; a buy realizes on the portion of a prior short it covers; fills
+    /// that only open/increase an exposure realize nothing.
+    [[nodiscard]] static auto realized_pnl(const Fill& fill, double qty_before,
+                                           double avg_before) -> double {
+        if (fill.side == finkit::trading::OrderSide::Sell) {
+            if (qty_before > 1e-10) { // closing (part of) a long
+                double closed = std::min(fill.quantity, qty_before);
+                return (fill.price - avg_before) * closed;
+            }
+            return 0.0; // opening/increasing a short
+        }
+        if (qty_before < -1e-10) { // buy covering (part of) a short
+            double covered = std::min(fill.quantity, -qty_before);
+            return (avg_before - fill.price) * covered;
+        }
+        return 0.0; // opening/increasing a long
+    }
+
+    /// Fold one fill's realized P&L into the trade-statistics accumulators and the
+    /// winner/loser classification. Called for every fill (ordinary and forced).
+    void record_trade_pnl(double pnl) {
+        sum_trade_pnl_ += pnl;
+        if (pnl > 0) {
+            result_.winning_trades++;
+            result_.largest_winner = std::max(result_.largest_winner, pnl);
+            gross_profit_ += pnl;
+        } else if (pnl < 0) {
+            result_.losing_trades++;
+            result_.largest_loser = std::min(result_.largest_loser, pnl);
+            gross_loss_ += -pnl;
+        }
+    }
+
+    /// Track a symbol's position open/close transitions to accumulate holding periods.
+    /// A holding period is recorded when a position returns to flat; the entry time is
+    /// the fill that first took it away from flat. A sign flip (long<->short without
+    /// passing through flat) keeps the original entry time (treated as one continuous
+    /// holding), which is an intentional simplification.
+    void track_position_lifecycle(const string& symbol, bool was_flat, bool is_flat,
+                                  Timestamp fill_time) {
+        if (was_flat && !is_flat) {
+            open_time_[symbol] = fill_time;
+        } else if (!was_flat && is_flat) {
+            if (auto it = open_time_.find(symbol); it != open_time_.end()) {
+                holding_periods_days_.push_back(days_between(it->second, fill_time));
+                open_time_.erase(it);
+            }
+        }
+    }
+
+    /// Whole-and-fractional calendar days between two timestamps (t1 <= t2).
+    [[nodiscard]] static auto days_between(Timestamp t1, Timestamp t2) -> double {
+        return std::chrono::duration<double, std::ratio<86400>>(t2 - t1).count();
     }
 
     /// Whether a symbol is tradeable at engine time `ts` given its listing window.
@@ -431,17 +625,15 @@ private:
                           .fill_time = now,
                           .is_partial = false,
                           .cumulative_filled = qty};
-                portfolio_.apply_fill(fill);
+                portfolio_.apply_fill(fill, instrument_currency(symbol));
 
                 result_.total_trades++;
                 result_.forced_liquidations++;
-                if (ev.realized_pnl > 0) {
-                    result_.winning_trades++;
-                    result_.largest_winner = std::max(result_.largest_winner, ev.realized_pnl);
-                } else if (ev.realized_pnl < 0) {
-                    result_.losing_trades++;
-                    result_.largest_loser = std::min(result_.largest_loser, ev.realized_pnl);
-                }
+                // The forced liquidation closes the position: route its realized P&L
+                // through the same trade-statistics accumulators as ordinary fills, and
+                // close out the position's holding period (the buy-in flattens it).
+                record_trade_pnl(ev.realized_pnl);
+                track_position_lifecycle(symbol, /*was_flat=*/false, /*is_flat=*/true, now);
 
                 for (auto& strategy : strategies_) {
                     strategy->on_fill(fill, ctx);
@@ -510,6 +702,20 @@ private:
     BacktestExecutionEngine execution_engine_;
     BacktestResult result_;
     vector<double> daily_returns_;
+
+    // Trade-statistics accumulators (reset each run()).
+    double gross_profit_{0.0};                    // Sum of positive per-fill realized P&L
+    double gross_loss_{0.0};                       // Sum of |negative| per-fill realized P&L
+    double sum_trade_pnl_{0.0};                    // Sum of all per-fill realized P&L
+    vector<double> holding_periods_days_;          // One entry per completed round trip
+    std::map<string, Timestamp> open_time_;        // Symbol -> entry time of the open position
+
+    // Drawdown-series accumulators (reset each run()).
+    double dd_sum_{0.0};       // Sum of per-bar drawdowns (for the time-averaged drawdown)
+    int dd_count_{0};          // Number of per-bar drawdown samples
+    Timestamp peak_time_{};    // Timestamp of the current high-water-mark peak
+    bool have_peak_time_{false};
+    bool underwater_{false};   // Whether NAV is currently below the prior peak
 
     Timestamp last_bar_time_{Timestamp::min()}; // Look-ahead guard: max bar time delivered so far
     set<string> delisted_;                      // Symbols whose delisting has been processed

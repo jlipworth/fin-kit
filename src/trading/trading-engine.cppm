@@ -6,9 +6,11 @@
 
 module;
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <map>
 #include <memory>
 #include <optional>
@@ -41,6 +43,27 @@ public:
                                              double slippage_bps) -> optional<Fill> = 0;
 };
 
+/// Whether a stop-family order's trigger has been touched by this bar.
+/// Buy stops arm when the market trades up to the stop (bar.high >= stop);
+/// sell stops arm when it trades down to it (bar.low <= stop). Orders without
+/// a stop price degrade to their base (market/limit) behavior.
+[[nodiscard]] auto stop_triggered(const Order& order, const BarEvent& bar) -> bool {
+    if (order.type != OrderType::Stop && order.type != OrderType::StopLimit) {
+        return true; // not a stop-family order
+    }
+    if (!order.stop_price) {
+        return true; // no trigger configured: degrade to the base type
+    }
+    return order.side == OrderSide::Buy ? bar.high >= *order.stop_price
+                                        : bar.low <= *order.stop_price;
+}
+
+/// Whether the order type carries a binding limit price (Limit, StopLimit
+/// after its trigger, and Limit-On-Close).
+[[nodiscard]] auto has_limit_semantics(OrderType type) -> bool {
+    return type == OrderType::Limit || type == OrderType::StopLimit || type == OrderType::LOC;
+}
+
 /// Fill at bar close price
 class CloseFillModel : public IFillModel {
 public:
@@ -48,6 +71,11 @@ public:
                                      double slippage_bps) -> optional<Fill> override {
         // Skip if symbol doesn't match
         if (order.symbol != bar.symbol) {
+            return std::nullopt;
+        }
+
+        // Stop / StopLimit orders rest until the bar touches the trigger.
+        if (!stop_triggered(order, bar)) {
             return std::nullopt;
         }
 
@@ -61,8 +89,8 @@ public:
             fill_price -= slippage;
         }
 
-        // Check limit orders
-        if (order.type == OrderType::Limit && order.limit_price) {
+        // Check limit-constrained orders (Limit, triggered StopLimit, LOC)
+        if (has_limit_semantics(order.type) && order.limit_price) {
             if (order.side == OrderSide::Buy && fill_price > *order.limit_price) {
                 return std::nullopt; // Price too high for buy limit
             }
@@ -93,6 +121,11 @@ public:
             return std::nullopt;
         }
 
+        // Stop / StopLimit orders rest until the bar touches the trigger.
+        if (!stop_triggered(order, bar)) {
+            return std::nullopt;
+        }
+
         // Use open price for next-bar fills
         double fill_price = bar.open;
 
@@ -103,8 +136,8 @@ public:
             fill_price -= slippage;
         }
 
-        // For limit orders, check if limit was reached in this bar
-        if (order.type == OrderType::Limit && order.limit_price) {
+        // For limit-constrained orders, check if the limit was reached in this bar
+        if (has_limit_semantics(order.type) && order.limit_price) {
             if (order.side == OrderSide::Buy) {
                 if (bar.low > *order.limit_price) {
                     return std::nullopt;
@@ -187,9 +220,24 @@ public:
     [[nodiscard]] auto submit_order(const Order& order) -> OrderId override {
         Order new_order = order;
         new_order.id = OrderId{next_order_id_++};
-        new_order.status = OrderStatus::Working;
         new_order.created_at = current_time_;
+        // A submitted order starts with a clean fill history even when the
+        // caller reused a previously (partially) filled Order as a template;
+        // stale filled_quantity would otherwise shrink or zero the next fill.
+        new_order.filled_quantity = 0.0;
+        new_order.avg_fill_price = 0.0;
+        new_order.rejection_reason = std::nullopt;
 
+        // Validate quantity: a non-positive (or NaN) quantity would produce a
+        // zero-share "fill" with avg_fill_price = 0/0 downstream.
+        if (!(new_order.quantity > 0.0)) {
+            new_order.status = OrderStatus::Rejected;
+            new_order.rejection_reason = "order quantity must be positive";
+            orders_[new_order.id] = new_order;
+            return new_order.id;
+        }
+
+        new_order.status = OrderStatus::Working;
         orders_[new_order.id] = new_order;
         working_orders_.push_back(new_order.id);
 
@@ -215,15 +263,28 @@ public:
     [[nodiscard]] auto modify_order(OrderId id, optional<double> new_qty,
                                     optional<double> new_price) -> bool override {
         auto it = orders_.find(id);
-        if (it == orders_.end() || it->second.status != OrderStatus::Working) {
+        // Working AND partially filled orders are live and modifiable (cancel
+        // already accepts both; refusing PartialFill here made a partially
+        // filled order impossible to reprice).
+        if (it == orders_.end() || (it->second.status != OrderStatus::Working &&
+                                    it->second.status != OrderStatus::PartialFill)) {
             return false;
         }
 
         if (new_qty) {
+            if (!(*new_qty > 0.0)) {
+                return false; // same validation as submit_order
+            }
             it->second.quantity = *new_qty;
         }
         if (new_price) {
-            it->second.limit_price = *new_price;
+            // Route the price to the field the order type actually consults:
+            // a plain Stop has no limit price, so new_price moves its trigger.
+            if (it->second.type == OrderType::Stop) {
+                it->second.stop_price = *new_price;
+            } else {
+                it->second.limit_price = *new_price;
+            }
         }
 
         return true;
@@ -278,6 +339,29 @@ public:
 
             Order& order = it->second;
 
+            // Time-in-force is evaluated against bars the order can actually
+            // trade on (same-symbol bars only).
+            if (order.symbol != bar.symbol)
+                continue;
+
+            // Day orders live for the bars of ONE calendar date — the first
+            // date on which they are eligible to trade (for daily-bar feeds,
+            // an order submitted intraday works the next session). A bar on a
+            // later date expires them unfilled.
+            if (order.tif == TimeInForce::Day) {
+                int bar_date = civil_date(bar.timestamp);
+                auto de = day_order_date_.find(id);
+                if (de != day_order_date_.end() && bar_date > de->second) {
+                    order.status = OrderStatus::Cancelled;
+                    order.rejection_reason = "Day order expired";
+                    to_remove.push_back(id);
+                    continue;
+                }
+                if (de == day_order_date_.end()) {
+                    day_order_date_[id] = bar_date;
+                }
+            }
+
             auto fill_opt = fill_model_->simulate_fill(order, bar, config_.default_slippage_bps);
 
             // Apply bid/ask half-spread as an additional adverse price adjustment
@@ -289,7 +373,7 @@ public:
                 fill.price += (order.side == OrderSide::Buy) ? spread_adj : -spread_adj;
 
                 // A spread-adjusted price may no longer satisfy the order's limit.
-                if (order.type == OrderType::Limit && order.limit_price) {
+                if (has_limit_semantics(order.type) && order.limit_price) {
                     if ((order.side == OrderSide::Buy && fill.price > *order.limit_price) ||
                         (order.side == OrderSide::Sell && fill.price < *order.limit_price)) {
                         if (raw_price == *order.limit_price) {
@@ -308,7 +392,14 @@ public:
                 }
             }
 
-            if (fill_opt) {
+            // Fill-or-Kill is all-or-none: discard a fill that would not
+            // complete the order (then the kill below cancels the order).
+            if (fill_opt && order.tif == TimeInForce::FOK &&
+                fill_opt->quantity < order.quantity - order.filled_quantity - 1e-10) {
+                fill_opt = std::nullopt;
+            }
+
+            if (fill_opt && fill_opt->quantity > 1e-10) {
                 Fill& fill = *fill_opt;
                 fill.fill_id = next_fill_id_++;
                 fill.commission = calculate_commission(fill);
@@ -332,6 +423,14 @@ public:
                 fills_by_order_[id].push_back(fill);
                 pending_fills_.push_back(fill);
             }
+
+            // Immediate-or-Cancel / Fill-or-Kill: whatever is left after the
+            // first eligible bar's attempt is cancelled, never rested.
+            if ((order.tif == TimeInForce::IOC || order.tif == TimeInForce::FOK) &&
+                order.status != OrderStatus::Filled) {
+                order.status = OrderStatus::Cancelled;
+                to_remove.push_back(id);
+            }
         }
 
         // Remove filled orders from working list
@@ -352,6 +451,18 @@ private:
     void remove_from_working(OrderId id) {
         working_orders_.erase(std::remove(working_orders_.begin(), working_orders_.end(), id),
                               working_orders_.end());
+        day_order_date_.erase(id);
+    }
+
+    /// Calendar date (yyyymmdd) of a timestamp, derived via localtime to match
+    /// the date convention used elsewhere in the codebase (and the mktime-built
+    /// timestamps in tests).
+    [[nodiscard]] static auto civil_date(Timestamp ts) -> int {
+        auto tt = std::chrono::system_clock::to_time_t(
+            std::chrono::time_point_cast<std::chrono::system_clock::duration>(ts));
+        std::tm tm_buf{};
+        localtime_r(&tt, &tm_buf);
+        return (tm_buf.tm_year + 1900) * 10000 + (tm_buf.tm_mon + 1) * 100 + tm_buf.tm_mday;
     }
 
     [[nodiscard]] auto calculate_commission(const Fill& fill) const -> double {
@@ -379,6 +490,7 @@ private:
     vector<OrderId> working_orders_;
     map<OrderId, vector<Fill>> fills_by_order_;
     vector<Fill> pending_fills_;
+    map<OrderId, int> day_order_date_; // Day-TIF: first eligible calendar date (yyyymmdd)
 };
 
 } // namespace finkit::trading

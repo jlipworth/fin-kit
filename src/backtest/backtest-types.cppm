@@ -99,7 +99,9 @@ struct BacktestConfig {
     bool persist_trades{true};
     bool persist_equity{true};
     bool persist_positions{true};
-    int equity_snapshot_frequency_bars{1};
+    int equity_snapshot_frequency_bars{1}; // Unused: returns are sampled per calendar
+                                           // day (per-bar sampling distorted Sharpe
+                                           // annualization on multi-bar days)
 };
 
 // ============================================================================

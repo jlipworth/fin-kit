@@ -379,6 +379,202 @@ TEST(RiskTest, PreTradeLiquidationGating) {
     EXPECT_EQ(red.reason, "Symbol AAPL is locked for liquidation");
 }
 
+// The engine's own liquidation orders (metadata source = "risk_liquidation")
+// must pass the symbol lock, or forced liquidation deadlocks on its own lock
+// and can never execute.
+TEST(RiskTest, LiquidationOrdersPassSymbolLock) {
+    RiskConfig cfg;
+    cfg.limits.pnl.max_drawdown_pct = 0.10;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_hwm(100000.0);
+    pf.set_nav(85000.0);
+    pf.set_position(pos("AAPL", 100.0, 50.0));
+    auto actions = eng.monitor(pf, fx, make_timestamp(2024, 6, 1));
+    ASSERT_EQ(actions.size(), 1u);
+    ASSERT_EQ(actions[0].generated_orders.size(), 1u);
+    ASSERT_TRUE(eng.is_symbol_locked("AAPL"));
+
+    // The generated liquidation order itself must be allowed through.
+    auto r = eng.check_pre_trade(actions[0].generated_orders[0], pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Allow);
+}
+
+// monitor() must latch: one Liquidate event per breach, not one per call
+// (repeat firings would emit duplicate liquidation orders every bar).
+TEST(RiskTest, MonitorLatchesWhileLiquidating) {
+    RiskConfig cfg;
+    cfg.limits.pnl.max_drawdown_pct = 0.10;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_hwm(100000.0);
+    pf.set_nav(85000.0);
+    pf.set_position(pos("AAPL", 100.0, 50.0));
+    EXPECT_EQ(eng.monitor(pf, fx, make_timestamp(2024, 6, 1)).size(), 1u);
+    // Drawdown unchanged on the next call: still Liquidating, no new event.
+    EXPECT_TRUE(eng.monitor(pf, fx, make_timestamp(2024, 6, 2)).empty());
+    EXPECT_EQ(eng.get_state(), PortfolioState::Liquidating);
+}
+
+// A wiped-out/negative NAV is a >= 100% drawdown and must trigger liquidation
+// (the old nav <= 0 early-return disabled it exactly when it mattered most).
+TEST(RiskTest, MonitorTriggersOnNegativeNav) {
+    RiskConfig cfg;
+    cfg.limits.pnl.max_drawdown_pct = 0.20;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_hwm(1000000.0);
+    pf.set_nav(-50000.0); // drawdown 105% > 20%
+    pf.set_position(pos("AAPL", 100.0, 50.0));
+    auto actions = eng.monitor(pf, fx, make_timestamp(2024, 6, 1));
+    ASSERT_EQ(actions.size(), 1u);
+    EXPECT_EQ(actions[0].action, RiskActionEvent::Action::Liquidate);
+    EXPECT_EQ(eng.get_state(), PortfolioState::Liquidating);
+}
+
+// In liquidation mode, "reducing" is capped by the open quantity: an
+// opposite-side order LARGER than the position flips the book, it does not
+// reduce it.
+TEST(RiskTest, LiquidatingRejectsPositionFlippingOrder) {
+    RiskConfig cfg;
+    cfg.limits.pnl.max_drawdown_pct = 0.10;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_hwm(100000.0);
+    pf.set_nav(85000.0);
+    pf.set_position(pos("AAPL", 100.0, 50.0));
+    (void)eng.monitor(pf, fx, make_timestamp(2024, 6, 1)); // trigger
+
+    // MSFT gets a small short AFTER the trigger (so it is not locked).
+    pf.set_position(pos("MSFT", -10.0, 25.0));
+    // Buy 1000 vs short 10: crosses to +990 long -> not reducing -> Reject.
+    auto flip = eng.check_pre_trade(make_market_order("MSFT", OrderSide::Buy, 1000.0), pf, fx);
+    EXPECT_EQ(flip.decision, RiskDecision::Reject);
+    EXPECT_TRUE(flip.conflicts_with_liquidation);
+    // Buy 10 exactly covers the short: genuinely reducing -> Allow.
+    auto cover = eng.check_pre_trade(make_market_order("MSFT", OrderSide::Buy, 10.0), pf, fx);
+    EXPECT_EQ(cover.decision, RiskDecision::Allow);
+}
+
+// reset_liquidation is reachable through the IRiskEngine interface (callers
+// hold unique_ptr<IRiskEngine>; previously the method existed only on the
+// concrete class, so locks leaked for the rest of the run).
+TEST(RiskTest, ResetLiquidationReachableViaInterface) {
+    RiskConfig cfg;
+    cfg.limits.pnl.max_drawdown_pct = 0.10;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_hwm(100000.0);
+    pf.set_nav(85000.0);
+    pf.set_position(pos("AAPL", 100.0, 50.0));
+    (void)eng.monitor(pf, fx, make_timestamp(2024, 6, 1));
+
+    IRiskEngine& iface = eng;
+    iface.reset_liquidation();
+    EXPECT_EQ(eng.get_state(), PortfolioState::Normal);
+    EXPECT_FALSE(eng.is_symbol_locked("AAPL"));
+}
+
+// ============================================================================
+// Pre-trade: portfolio limits — FX conversion, signed exposure delta,
+// limit-price fallback (regressions)
+// ============================================================================
+
+// Order notional must be FX-converted before mixing into the USD gross
+// aggregate (an EUR notional was previously added as if it were USD).
+TEST(RiskTest, PortfolioGrossFXConvertsOrderNotional) {
+    RiskConfig cfg;
+    cfg.limits.portfolio.max_gross_exposure = 1000000.0;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    fx.set_rate(Currency::EUR, Currency::USD, 1.10);
+    MockPortfolio pf;
+    pf.set_nav(2000000.0);
+    pf.set_position(pos("EFOO", 8000.0, 100.0, Currency::EUR)); // gross 880k USD
+
+    // Buy 1000: delta 100k EUR = 110k USD -> 990k <= 1M -> Allow.
+    EXPECT_EQ(eng.check_pre_trade(make_market_order("EFOO", OrderSide::Buy, 1000.0), pf, fx)
+                  .decision,
+              RiskDecision::Allow);
+    // Buy 1200: delta 120k EUR = 132k USD -> 1012k > 1M -> Reject.
+    // (Unconverted, 880k + 120k = 1000k would have slipped through.)
+    auto r = eng.check_pre_trade(make_market_order("EFOO", OrderSide::Buy, 1200.0), pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Reject);
+    ASSERT_FALSE(r.violated_limits.empty());
+    EXPECT_EQ(r.violated_limits[0], "portfolio.max_gross_exposure");
+}
+
+// A sell that reduces a long book LOWERS gross exposure; it must not be
+// rejected by the gross/leverage projection (previously order notional was
+// added regardless of side, blocking pure de-risking).
+TEST(RiskTest, PortfolioGrossSellReducesExposure) {
+    RiskConfig cfg;
+    cfg.limits.portfolio.max_gross_exposure = 2000.0;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_nav(10000.0);
+    pf.set_position(pos("AAPL", 30.0, 50.0)); // gross 1500
+    // Sell 20: gross 1500 -> 500. Old code projected 1500 + 1000 = 2500 -> Reject.
+    auto r = eng.check_pre_trade(make_market_order("AAPL", OrderSide::Sell, 20.0), pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Allow);
+}
+
+// The first order in a symbol has no position mark; the order's limit price
+// is the fallback so notional-based checks are not silently bypassed.
+TEST(RiskTest, PortfolioGrossUsesLimitPriceFallback) {
+    RiskConfig cfg;
+    cfg.limits.portfolio.max_gross_exposure = 1000.0;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_nav(10000.0);
+    // No position: limit 50 x 100 = 5000 > 1000 -> Reject (was Allow: price 0).
+    auto r = eng.check_pre_trade(make_limit_order("NEW", OrderSide::Buy, 100.0, 50.0), pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Reject);
+    ASSERT_FALSE(r.violated_limits.empty());
+    EXPECT_EQ(r.violated_limits[0], "portfolio.max_gross_exposure");
+}
+
+// Per-symbol concentration must FX-convert the position notional before
+// dividing by the USD NAV.
+TEST(RiskTest, ConcentrationPositionLimitFXConverted) {
+    RiskConfig cfg;
+    cfg.limits.default_position_limits.max_concentration_pct = 0.25;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    fx.set_rate(Currency::GBP, Currency::USD, 1.27);
+    MockPortfolio pf;
+    pf.set_nav(1000000.0);
+    pf.set_position(pos("GFOO", 1000.0, 100.0, Currency::GBP));
+    // New qty 2000 x GBP100 = 200k GBP = 254k USD = 25.4% > 25% -> Reject.
+    // (Unconverted: 200k/1M = 20% would have been allowed.)
+    auto r = eng.check_pre_trade(make_market_order("GFOO", OrderSide::Buy, 1000.0), pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Reject);
+    EXPECT_EQ(r.reason, "Exceeds concentration limit");
+}
+
+// max_quantity Reduce headroom is signed: a buy against a short may cross up
+// to (max_quantity - current_qty), not (max_quantity - |current_qty|).
+TEST(RiskTest, PreTradeMaxQtySignedHeadroomOnCrossing) {
+    RiskConfig cfg;
+    cfg.limits.default_position_limits.max_quantity = 100.0;
+    StandardRiskEngine eng(cfg);
+    StaticFXProvider fx;
+    MockPortfolio pf;
+    pf.set_position(pos("AAPL", -50.0, 10.0));
+    // Buy 200 -> new qty +150 violates; correct allowance is 150 (final +100).
+    auto r = eng.check_pre_trade(make_market_order("AAPL", OrderSide::Buy, 200.0), pf, fx);
+    EXPECT_EQ(r.decision, RiskDecision::Reduce);
+    ASSERT_TRUE(r.adjusted_quantity.has_value());
+    EXPECT_DOUBLE_EQ(*r.adjusted_quantity, 150.0); // old (wrong) value: 50
+}
+
 // ============================================================================
 // Pre-trade: liquidity limits (ADV-based sizing)
 // ============================================================================

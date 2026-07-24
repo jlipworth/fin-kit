@@ -11,7 +11,7 @@ target_sources(
          backtest-engine.cppm)
 
 target_link_libraries(
-  finkit_backtest PUBLIC finkit::types finkit::trading finkit::risk
+  finkit_backtest PUBLIC finkit::types finkit::trading finkit::risk finkit::stats
                          QuantLib::QuantLib Eigen3::Eigen uuid)
 
 target_compile_features(finkit_backtest PUBLIC cxx_std_20)
