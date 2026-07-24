@@ -15,3 +15,9 @@ add_executable(integration_test integration_test.cpp)
 target_link_libraries(integration_test PRIVATE finkit::backtest GTest::gtest_main)
 
 gtest_discover_tests(integration_test)
+
+add_executable(property_test property_test.cpp)
+
+target_link_libraries(property_test PRIVATE finkit::backtest GTest::gtest_main)
+
+gtest_discover_tests(property_test)
